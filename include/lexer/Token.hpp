@@ -40,7 +40,9 @@
   X(RBRACK)                                                                    \
   X(LBRACE)                                                                    \
   X(RBRACE)                                                                    \
-  X(ASSIGN)
+  X(ASSIGN)                                                                    \
+  X(END_OF_FILE)                                                               \
+  X(UNKNOWN)
 
 #define X(name) name,
 enum class TokenType { TOKEN_LIST };
@@ -56,7 +58,10 @@ public:
   Token(TokenType type, std::string lexeme, int line,
         std::variant<std::monostate, int, std::string> value = {})
       : type(type), lexeme(lexeme), line(line), value(value) {}
-  std::string getTokenName(TokenType type) {
+  std::variant<std::monostate, int, std::string> getToken() const {
+    return value;
+  }
+  std::string getTokenType() {
     switch (type) {
 #define X(name)                                                                \
   case TokenType::name:                                                        \

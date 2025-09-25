@@ -1,6 +1,7 @@
+#pragma once
 #include "Token.hpp"
 #include <unordered_map>
-class lexer {
+class Lexer {
 private:
   std::string source;
   size_t pos = 0;
@@ -13,8 +14,9 @@ private:
       {"main", TokenType::MAINTK},         {"else", TokenType::ELSETK},
       {"for", TokenType::FORTK},           {"return", TokenType::RETURNTK},
       {"void", TokenType::VOIDTK},         {"printf", TokenType::PRINTFTK}};
+  void skipwhitespace();
 
 public:
-  lexer(std::string source) : source(source) {}
+  Lexer(std::string source) : source(source) {}
   Token nextToken();
 };
