@@ -3,9 +3,8 @@
 #include <string>
 
 void Lexer::skipwhitespace() {
-  while ((source[pos] == '\t' || source[pos] == '\r' || source[pos] == '\n' ||
-          source[pos] == ' ') &&
-         pos < source.length()) {
+  while (pos < source.length() && (source[pos] == '\t' || source[pos] == '\r' ||
+                                  source[pos] == '\n' || source[pos] == ' ')) {
     if (source[pos] == '\n') {
       line++;
     }
@@ -28,9 +27,10 @@ Token Lexer::nextToken() {
     pos = index;
     return Token(TokenType::INTCON, digit, line, std::stoi(digit));
 
-  } else if (isalpha(source[pos])) {
+  } else if (isalpha(source[pos]) || source[pos] == '_') {
     std::string word;
-    for (index = pos; isalpha(source[index]) && index < source.length();
+    for (index = pos;
+         (isalnum(source[index]) || source[index] == '_') && index < source.length();
          index++) {
       word.push_back(source[index]);
     }
@@ -77,8 +77,8 @@ Token Lexer::nextToken() {
   case '/': {
     if (source[pos + 1] == '*') {
       index = pos + 1;
-      while ((source[index] != '*' || source[index] != '/') &&
-             index < source.length()) {
+      while (index < source.length() - 1 &&
+             (source[index] != '*' || source[index + 1] != '/')) {
         if (source[index] == '\n') {
           line++;
         }
@@ -88,7 +88,7 @@ Token Lexer::nextToken() {
       return nextToken();
     } else if (source[pos + 1] == '/') {
       pos += 2;
-      while (source[pos] != '\n') {
+      while (pos < source.length() && source[pos] != '\n') {
         pos++;
       }
       return nextToken();
@@ -172,10 +172,11 @@ Token Lexer::nextToken() {
   default:
     index = pos;
     std::string unknown;
-    while ((source[index] != ' ' || source[index] != '\t' ||
-            source[index] != '\n' || source[index] != '\r') &&
-           index < source.length()) {
+    while (index < source.length() && source[index] != ' ' &&
+           source[index] != '\t' && source[index] != '\n' &&
+           source[index] != '\r') {
       unknown.push_back(source[index]);
+      index++;
     }
     pos = index;
     return Token(TokenType::UNKNOWN, unknown, line);

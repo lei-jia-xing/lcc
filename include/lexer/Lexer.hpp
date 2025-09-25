@@ -4,8 +4,8 @@
 class Lexer {
 private:
   std::string source;
-  size_t pos = 0;
-  int line = 1;
+  size_t pos;
+  int line;
 
   inline static std::unordered_map<std::string, TokenType> reserveWords = {
       {"const", TokenType::CONSTTK},       {"int", TokenType::INTTK},
@@ -17,6 +17,7 @@ private:
   void skipwhitespace();
 
 public:
-  Lexer(std::string source) : source(source) {}
+  Lexer(std::string source, size_t pos, int line)
+      : source(source), pos(pos = 0), line(line = 1) {}
   Token nextToken();
 };
