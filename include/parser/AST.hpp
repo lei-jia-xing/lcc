@@ -482,7 +482,7 @@ public:
  */
 class AddExp : public ASTNode {
 public:
-  enum class OpType { NONE, PLUS, MINUS };
+  enum class OpType { NONE, PLUS, MINU };
   std::unique_ptr<AddExp> left;
   OpType op = OpType::NONE;
   std::unique_ptr<MulExp> mulExp;
