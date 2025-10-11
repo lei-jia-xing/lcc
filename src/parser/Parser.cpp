@@ -126,21 +126,26 @@ std::unique_ptr<ConstDef> Parser::parseConstDef() {
 std::unique_ptr<VarDef> Parser::parseVarDef() {
   auto varDef = std::make_unique<VarDef>();
   varDef->ident = current.lexeme;
-  advance();
-  if (current.type != TokenType::LBRACK) {
-    // error();
+  advance(); // eat ident
+
+  if (current.type == TokenType::LBRACK) {
+    advance(); // eat lbrack
+    varDef->arraySize = parseConstExp();
+    if (current.type != TokenType::RBRACK) {
+      error(current.line, "k");
+    }
+    advance(); // eat rbrack
+  } else {
+    varDef->arraySize = nullptr;
   }
-  advance();
-  varDef->arraySize = parseConstExp();
-  if (current.type != TokenType::RBRACK) {
-    error(current.line, "k");
-  }
-  advance();
-  varDef->initVal = nullptr;
+
   if (current.type == TokenType::ASSIGN) {
-    advance();
+    advance(); // eat assign
     varDef->initVal = parseInitVal();
+  } else {
+    varDef->initVal = nullptr;
   }
+
   std::cout << "<VarDef>" << std::endl;
   return varDef;
 }
@@ -246,6 +251,7 @@ std::unique_ptr<FuncType> Parser::parseFuncType() {
   } else {
     // error();
   }
+  advance();
   std::cout << "<FuncType>" << std::endl;
   return funcType;
 }
@@ -643,6 +649,7 @@ std::unique_ptr<UnaryOp> Parser::parseUnaryOp() {
   } else {
     // error();
   }
+  advance();
   std::cout << "<UnaryOp>" << std::endl;
   return unaryOp;
 }
