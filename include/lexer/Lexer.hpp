@@ -17,6 +17,7 @@ private:
   void skipwhitespace();
 
 public:
+  void error(const int &line, const std::string errorType);
   Lexer(std::string source, size_t pos, int line)
       : source(source), pos(pos = 0), line(line = 1) {}
   Token nextToken();

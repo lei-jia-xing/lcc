@@ -1,5 +1,6 @@
 #include "lexer/Lexer.hpp"
 #include "lexer/Token.hpp"
+#include <iostream>
 #include <string>
 
 void Lexer::skipwhitespace() {
@@ -10,6 +11,9 @@ void Lexer::skipwhitespace() {
     }
     pos++;
   }
+}
+void Lexer::error(const int &line, const std::string errorType) {
+  std::cerr << line << " " << errorType << std::endl;
 }
 
 Token Lexer::nextToken() {
@@ -60,6 +64,7 @@ Token Lexer::nextToken() {
       return Token(TokenType::AND, "&&", line);
     }
     pos++;
+    error(line, "a");
     return Token(TokenType::UNKNOWN, "&", line);
   }
   case '|': {
@@ -68,6 +73,7 @@ Token Lexer::nextToken() {
       return Token(TokenType::OR, "||", line);
     }
     pos++;
+    error(line, "a");
     return Token(TokenType::UNKNOWN, "|", line);
   }
   case '+': {
@@ -187,6 +193,7 @@ Token Lexer::nextToken() {
       index++;
     }
     pos = index;
+    error(line, "a");
     return Token(TokenType::UNKNOWN, unknown, line);
   }
 }
