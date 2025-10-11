@@ -3,6 +3,8 @@
 #include <iostream>
 #include <string>
 
+Lexer::Lexer(std::string source, size_t pos, int line)
+    : source(source), pos(pos), line(line) {}
 void Lexer::skipwhitespace() {
   while (pos < source.length() && (source[pos] == '\t' || source[pos] == '\r' ||
                                    source[pos] == '\n' || source[pos] == ' ')) {

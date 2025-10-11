@@ -18,7 +18,6 @@ private:
 
 public:
   void error(const int &line, const std::string errorType);
-  Lexer(std::string source, size_t pos, int line)
-      : source(source), pos(pos = 0), line(line = 1) {}
+  Lexer(std::string source, size_t pos = 0, int line = 1);
   Token nextToken();
 };
