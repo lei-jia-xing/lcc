@@ -1,27 +1,31 @@
 #include "lexer/Lexer.hpp"
-#include "lexer/Token.hpp"
+#include "parser/Parser.hpp"
 #include <fstream>
 #include <iostream>
+
 int main() {
-  std::ifstream inputfile;
   std::ofstream errorfile("error.txt");
-  std::ofstream lexerfile("lexer.txt");
-  inputfile.open("testfile.txt");
+  std::streambuf *original_cerr = std::cerr.rdbuf();
+  std::cerr.rdbuf(errorfile.rdbuf());
+
+  std::ifstream inputfile("testfile.txt");
   if (!inputfile.is_open()) {
-    std::cerr << "Error opening file" << std::endl;
+    std::cerr << "Error opening testfile.txt" << std::endl;
+    std::cerr.rdbuf(original_cerr);
     return 1;
   }
+
   std::string fileContent((std::istreambuf_iterator<char>(inputfile)),
                           std::istreambuf_iterator<char>());
-  class Lexer lexer = Lexer(fileContent, 0, 1);
-  class Token token = lexer.nextToken();
-  while (token.type != TokenType::END_OF_FILE) {
-    if (token.type == TokenType::UNKNOWN) {
-      errorfile << token.line << " " << "a" << std::endl;
-    } else {
-      lexerfile << token.getTokenType() << " " << token.lexeme << std::endl;
-    }
-    token = lexer.nextToken();
+  inputfile.close();
+  try {
+    Lexer lexer(fileContent);
+    Parser parser(std::move(lexer));
+    auto compUnit = parser.parseCompUnit();
+  } catch (const std::exception &e) {
+    std::cerr << "Parse error: " << e.what() << std::endl;
   }
+  std::cerr.rdbuf(original_cerr);
+
   return 0;
 }
