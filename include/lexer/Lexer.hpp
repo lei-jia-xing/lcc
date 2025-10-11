@@ -17,7 +17,10 @@ private:
   void skipwhitespace();
 
 public:
+  inline static int silentDepth = 0;
   void error(const int &line, const std::string errorType);
   Lexer(std::string source, size_t pos = 0, int line = 1);
   Token nextToken();
+  void silentPV(bool silent);
+  void output(const std::string &type, const std::string &value);
 };

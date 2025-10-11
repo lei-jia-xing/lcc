@@ -18,6 +18,20 @@ void Lexer::error(const int &line, const std::string errorType) {
   std::cerr << line << " " << errorType << std::endl;
 }
 
+void Lexer::silentPV(bool silent) {
+  if (silent) {
+    silentDepth++;
+  } else {
+    silentDepth--;
+  }
+}
+
+void Lexer::output(const std::string &type, const std::string &value) {
+  if (silentDepth == 0) {
+    std::cout << type << " " << value << std::endl;
+  }
+}
+
 Token Lexer::nextToken() {
   int index;
   skipwhitespace();
@@ -31,7 +45,7 @@ Token Lexer::nextToken() {
       digit.push_back(source[index]);
     }
     pos = index;
-    std::cout << "INTCON" << " " << digit << std::endl;
+    output("INTCON", digit);
     return Token(TokenType::INTCON, digit, line, std::stoi(digit));
 
   } else if (isalpha(source[pos]) || source[pos] == '_') {
@@ -44,10 +58,10 @@ Token Lexer::nextToken() {
     pos = index;
     if (reserveWords.find(word) != reserveWords.end()) {
       auto token = Token(reserveWords[word], word, line);
-      std::cout << token.lexeme << " " << word << std::endl;
+      output(token.getTokenType(), word);
       return token;
     } else {
-      std::cout << "IDENFR" << " " << word << std::endl;
+      output("IDENFR", word);
       return Token(TokenType::IDENFR, word, line, word);
     }
   }
@@ -55,17 +69,17 @@ Token Lexer::nextToken() {
   case '!': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
-      std::cout << "NEQ" << " " << "!=" << std::endl;
+      output("NEQ", "!=");
       return Token(TokenType::NEQ, "!=", line);
     }
     pos++;
-    std::cout << "NOT" << " " << "!" << std::endl;
+    output("NOT", "!");
     return Token(TokenType::NOT, "!", line);
   }
   case '&': {
     if (pos + 1 < source.length() && source[pos + 1] == '&') {
       pos += 2;
-      std::cout << "AND" << " " << "&&" << std::endl;
+      output("AND", "&&");
       return Token(TokenType::AND, "&&", line);
     }
     pos++;
@@ -75,7 +89,7 @@ Token Lexer::nextToken() {
   case '|': {
     if (pos + 1 < source.length() && source[pos + 1] == '|') {
       pos += 2;
-      std::cout << "OR" << " " << "||" << std::endl;
+      output("OR", "||");
       return Token(TokenType::OR, "||", line);
     }
     pos++;
@@ -84,17 +98,17 @@ Token Lexer::nextToken() {
   }
   case '+': {
     pos++;
-    std::cout << "PLUS" << " " << "+" << std::endl;
+    output("PLUS", "+");
     return Token(TokenType::PLUS, "+", line);
   }
   case '-': {
     pos++;
-    std::cout << "MINU" << " " << "-" << std::endl;
+    output("MINU", "-");
     return Token(TokenType::MINU, "-", line);
   }
   case '*': {
     pos++;
-    std::cout << "MULT" << " " << "*" << std::endl;
+    output("MULT", "*");
     return Token(TokenType::MULT, "*", line);
   }
   case '/': {
@@ -117,82 +131,82 @@ Token Lexer::nextToken() {
       return nextToken();
     }
     pos++;
-    std::cout << "DIV" << " " << "/" << std::endl;
+    output("DIV", "/");
     return Token(TokenType::DIV, "/", line);
   }
   case '%': {
     pos++;
-    std::cout << "MOD" << " " << "%" << std::endl;
+    output("MOD", "%");
     return Token(TokenType::MOD, "%", line);
   }
   case '<': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
-      std::cout << "LEQ" << " " << "<=" << std::endl;
+      output("LEQ", "<=");
       return Token(TokenType::LEQ, "<=", line);
     }
     pos++;
-    std::cout << "LSS" << " " << "<" << std::endl;
+    output("LSS", "<");
     return Token(TokenType::LSS, "<", line);
   }
   case '>': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
-      std::cout << "GEQ" << " " << ">=" << std::endl;
+      output("GEQ", ">=");
       return Token(TokenType::GEQ, ">=", line);
     }
     pos++;
-    std::cout << "GRE" << " " << ">" << std::endl;
+    output("GRE", ">");
     return Token(TokenType::GRE, ">", line);
   }
   case '=': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
-      std::cout << "EQL" << " " << "==" << std::endl;
+      output("EQL", "==");
       return Token(TokenType::EQL, "==", line);
     }
     pos++;
-    std::cout << "ASSIGN" << " " << "=" << std::endl;
+    output("ASSIGN", "=");
     return Token(TokenType::ASSIGN, "=", line);
   }
   case ';': {
     pos++;
-    std::cout << "SEMICN" << " " << ";" << std::endl;
+    output("SEMICN", ";");
     return Token(TokenType::SEMICN, ";", line);
   }
   case ',': {
     pos++;
-    std::cout << "COMMA" << " " << "," << std::endl;
+    output("COMMA", ",");
     return Token(TokenType::COMMA, ",", line);
   }
   case '(': {
     pos++;
-    std::cout << "LPARENT" << " " << "(" << std::endl;
+    output("LPARENT", "(");
     return Token(TokenType::LPARENT, "(", line);
   }
   case ')': {
     pos++;
-    std::cout << "RPARENT" << " " << ")" << std::endl;
+    output("RPARENT", ")");
     return Token(TokenType::RPARENT, ")", line);
   }
   case '[': {
     pos++;
-    std::cout << "LBRACK" << " " << "[" << std::endl;
+    output("LBRACK", "[");
     return Token(TokenType::LBRACK, "[", line);
   }
   case ']': {
     pos++;
-    std::cout << "RBRACK" << " " << "]" << std::endl;
+    output("RBRACK", "]");
     return Token(TokenType::RBRACK, "]", line);
   }
   case '{': {
     pos++;
-    std::cout << "LBRACE" << " " << "{" << std::endl;
+    output("LBRACE", "{");
     return Token(TokenType::LBRACE, "{", line);
   }
   case '}': {
     pos++;
-    std::cout << "RBRACE" << " " << "}" << std::endl;
+    output("RBRACE", "}");
     return Token(TokenType::RBRACE, "}", line);
   }
   case '"': {
@@ -205,7 +219,7 @@ Token Lexer::nextToken() {
     }
     strcon.push_back('"');
     pos = index + 1;
-    std::cout << "STRCON" << " " << strcon << std::endl;
+    output("STRCON", strcon);
     return Token(TokenType::STRCON, strcon, line, strcon);
   }
 

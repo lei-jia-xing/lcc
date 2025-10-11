@@ -10,10 +10,13 @@ private:
   Token current;
   void advance();
   bool match(TokenType type);
+  inline static int silentDepth = 0;
 
 public:
   void error(const int &line, const std::string errorType);
   explicit Parser(Lexer &&lexer, Token current);
+  void silentPV(bool silent);
+  void output(const std::string &type);
   // 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
   std::unique_ptr<CompUnit> parseCompUnit();
 
