@@ -4,3 +4,4 @@ build/
 latex/
 html/
 zip.sh
+*.pdf
