@@ -5,7 +5,7 @@
 #include <memory>
 
 Parser::Parser(Lexer &&lexer, Token current)
-    : lexer(std::move(lexer)), current(lexer.nextToken()) {}
+    : lexer(std::move(lexer)), current(current) {}
 void Parser::advance() { current = lexer.nextToken(); }
 bool Parser::match(TokenType type) {
   if (current.type == type) {
@@ -29,6 +29,7 @@ std::unique_ptr<CompUnit> Parser::parseCompUnit() {
     compUnit->funcDefs.push_back(parseFuncDef());
   }
   compUnit->mainFuncDef = parseMainFuncDef();
+  std::cout << "<CompUnit>" << std::endl;
   return compUnit;
 }
 
@@ -39,6 +40,7 @@ std::unique_ptr<Decl> Parser::parseDecl() {
   } else {
     decl = parseVarDecl();
   }
+  std::cout << "<Decl>" << std::endl;
   return decl;
 }
 
@@ -55,6 +57,7 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
     error(current.line, "i");
   }
   advance(); // eat semicn
+  std::cout << "<ConstDecl>" << std::endl;
   return constDecl;
 }
 
@@ -73,6 +76,7 @@ std::unique_ptr<VarDecl> Parser::parseVarDecl() {
     error(current.line, "i");
   }
   advance(); // eat semicn
+  std::cout << "<VarDecl>" << std::endl;
   return varDecl;
 }
 
@@ -85,6 +89,7 @@ std::unique_ptr<BType> Parser::parseBType() {
     // error();
   }
   advance(); // eat int
+  std::cout << "<BType>" << std::endl;
   return bType;
 }
 
@@ -104,15 +109,18 @@ std::unique_ptr<ConstDef> Parser::parseConstDef() {
     }
     advance(); // eat assign
     constDef->constinitVal = parseConstInitVal();
+    std::cout << "<ConstDef>" << std::endl;
     return constDef;
 
   } else if (current.type == TokenType::ASSIGN) {
     advance(); // eat assign
     constDef->constinitVal = parseConstInitVal();
+    std::cout << "<ConstDef>" << std::endl;
+    return constDef;
+  } else {
+    // error();
     return constDef;
   }
-  // error();
-  return constDef;
 }
 
 std::unique_ptr<VarDef> Parser::parseVarDef() {
@@ -133,6 +141,7 @@ std::unique_ptr<VarDef> Parser::parseVarDef() {
     advance();
     varDef->initVal = parseInitVal();
   }
+  std::cout << "<VarDef>" << std::endl;
   return varDef;
 }
 
@@ -155,6 +164,7 @@ std::unique_ptr<ConstInitVal> Parser::parseConstInitVal() {
   } else {
     constInitVal->exp = parseConstExp();
   }
+  std::cout << "<ConstInitVal>" << std::endl;
   return constInitVal;
 }
 
@@ -177,6 +187,7 @@ std::unique_ptr<InitVal> Parser::parseInitVal() {
   } else {
     initVal->exp = parseExp();
   }
+  std::cout << "<InitVal>" << std::endl;
   return initVal;
 }
 
@@ -197,6 +208,7 @@ std::unique_ptr<FuncDef> Parser::parseFuncDef() {
   }
   advance(); // eat rparent
   funcDef->block = parseBlock();
+  std::cout << "<FuncDef>" << std::endl;
   return funcDef;
 }
 
@@ -219,6 +231,7 @@ std::unique_ptr<MainFuncDef> Parser::parseMainFuncDef() {
   }
   advance(); // eat rparent
   mainFuncDef->block = parseBlock();
+  std::cout << "<MainFuncDef>" << std::endl;
   return mainFuncDef;
 }
 
@@ -233,6 +246,7 @@ std::unique_ptr<FuncType> Parser::parseFuncType() {
   } else {
     // error();
   }
+  std::cout << "<FuncType>" << std::endl;
   return funcType;
 }
 
@@ -243,6 +257,7 @@ std::unique_ptr<FuncFParams> Parser::parseFuncFParams() {
     advance(); // eat comma
     funcFParams->params.push_back(parseFuncFParam());
   }
+  std::cout << "<FuncFParams>" << std::endl;
   return funcFParams;
 }
 
@@ -259,6 +274,7 @@ std::unique_ptr<FuncFParam> Parser::parseFuncFParam() {
     advance(); // eat rbrack
     funcFParam->isArray = true;
   }
+  std::cout << "<FuncFParam>" << std::endl;
   return funcFParam;
 }
 
@@ -278,6 +294,7 @@ std::unique_ptr<Block> Parser::parseBlock() {
     // error();
   }
   advance(); // eat rbrace
+  std::cout << "<Block>" << std::endl;
   return block;
 }
 
@@ -289,6 +306,7 @@ std::unique_ptr<BlockItem> Parser::parseBlockItem() {
   } else {
     blockItem->stmt = parseStmt();
   }
+  std::cout << "<BlockItem>" << std::endl;
   return blockItem;
 }
 
@@ -313,6 +331,7 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
     advance(); // eat else
     ifStmt->elseStmt = parseStmt();
   }
+  std::cout << "<Stmt>" << std::endl;
   return ifStmt;
 }
 std::unique_ptr<ForStmt> Parser::parseForStmtStmt() {
@@ -339,6 +358,7 @@ std::unique_ptr<ForStmt> Parser::parseForStmtStmt() {
   }
   advance(); // eat rparent
   forStmt->bodyStmt = parseStmt();
+  std::cout << "<Stmt>" << std::endl;
   return forStmt;
 }
 std::unique_ptr<BreakStmt> Parser::parseBreakStmt() {
@@ -352,6 +372,7 @@ std::unique_ptr<BreakStmt> Parser::parseBreakStmt() {
   }
   breakStmt->line = current.line;
   advance(); // eat semicn
+  std::cout << "<Stmt>" << std::endl;
   return breakStmt;
 }
 std::unique_ptr<ContinueStmt> Parser::parseContinueStmt() {
@@ -365,6 +386,7 @@ std::unique_ptr<ContinueStmt> Parser::parseContinueStmt() {
   }
   continueStmt->line = current.line;
   advance();
+  std::cout << "<Stmt>" << std::endl;
   return continueStmt;
 }
 std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
@@ -381,6 +403,7 @@ std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
     }
   }
   advance();
+  std::cout << "<Stmt>" << std::endl;
   return returnStmt;
 }
 std::unique_ptr<PrintfStmt> Parser::parsePrintfStmt() {
@@ -407,6 +430,7 @@ std::unique_ptr<PrintfStmt> Parser::parsePrintfStmt() {
     error(current.line, "i");
   }
   advance();
+  std::cout << "<Stmt>" << std::endl;
   return printfStmt;
 }
 std::unique_ptr<AssignStmt> Parser::parseAssignStmt() {
@@ -421,6 +445,7 @@ std::unique_ptr<AssignStmt> Parser::parseAssignStmt() {
     error(current.line, "i");
   }
   advance();
+  std::cout << "<Stmt>" << std::endl;
   return assignStmt;
 }
 std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
@@ -432,11 +457,13 @@ std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
     }
   }
   advance();
+  std::cout << "<Stmt>" << std::endl;
   return expStmt;
 }
 std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
   auto blockStmt = std::make_unique<BlockStmt>();
   blockStmt->block = parseBlock();
+  std::cout << "<Stmt>" << std::endl;
   return blockStmt;
 }
 
@@ -493,18 +520,21 @@ std::unique_ptr<ForAssignStmt> Parser::parseForAssignStmt() {
     auto exp = parseExp();
     forAssignStmt->assignments.push_back({std::move(lval), std::move(exp)});
   }
+  std::cout << "<ForStmt>" << std::endl;
   return forAssignStmt;
 }
 
 std::unique_ptr<Exp> Parser::parseExp() {
   auto exp = std::make_unique<Exp>();
   exp->addExp = parseAddExp();
+  std::cout << "<Exp>" << std::endl;
   return exp;
 }
 
 std::unique_ptr<Cond> Parser::parseCond() {
   auto cond = std::make_unique<Cond>();
   cond->lOrExp = parseLOrExp();
+  std::cout << "<Cond>" << std::endl;
   return cond;
 }
 
@@ -522,6 +552,7 @@ std::unique_ptr<LVal> Parser::parseLVal() {
   } else {
     lVal->arrayIndex = nullptr;
   }
+  std::cout << "<LVal>" << std::endl;
   return lVal;
 }
 
@@ -544,6 +575,7 @@ std::unique_ptr<PrimaryExp> Parser::parsePrimaryExp() {
   } else {
     // error();
   }
+  std::cout << "<PrimaryExp>" << std::endl;
   return primaryExp;
 }
 
@@ -553,6 +585,7 @@ std::unique_ptr<Number> Parser::parseNumber() {
     number->value = std::get<int>(current.value);
   }
   advance();
+  std::cout << "<Number>" << std::endl;
   return number;
 }
 
@@ -573,12 +606,14 @@ std::unique_ptr<UnaryExp> Parser::parseUnaryExp() {
         }
       }
       advance(); // eat rparent
+      std::cout << "<UnaryExp>" << std::endl;
       return unaryExp;
     } else {
       lexer = temp;
       current = tempCurrent;
       unaryExp->unaryType = UnaryExp::UnaryType::PRIMARY;
       unaryExp->primaryExp = parsePrimaryExp();
+      std::cout << "<UnaryExp>" << std::endl;
       return unaryExp;
     }
   } else if (current.type == TokenType::PLUS ||
@@ -587,10 +622,12 @@ std::unique_ptr<UnaryExp> Parser::parseUnaryExp() {
     unaryExp->unaryType = UnaryExp::UnaryType::UNARY_OP;
     unaryExp->unaryOp = parseUnaryOp();
     unaryExp->unaryExp = parseUnaryExp();
+    std::cout << "<UnaryExp>" << std::endl;
     return unaryExp;
   } else {
     unaryExp->unaryType = UnaryExp::UnaryType::PRIMARY;
     unaryExp->primaryExp = parsePrimaryExp();
+    std::cout << "<UnaryExp>" << std::endl;
     return unaryExp;
   }
 }
@@ -606,6 +643,7 @@ std::unique_ptr<UnaryOp> Parser::parseUnaryOp() {
   } else {
     // error();
   }
+  std::cout << "<UnaryOp>" << std::endl;
   return unaryOp;
 }
 
@@ -616,6 +654,7 @@ std::unique_ptr<FuncRParams> Parser::parseFuncRParams() {
     advance(); // eat comma
     funcRParams->exps.push_back(parseExp());
   }
+  std::cout << "<FuncRParams>" << std::endl;
   return funcRParams;
 }
 
@@ -640,6 +679,7 @@ std::unique_ptr<MulExp> Parser::parseMulExp() {
     newLeft->unaryExp = parseUnaryExp();
     mulExp = std::move(newLeft);
   }
+  std::cout << "<MulExp>" << std::endl;
   return mulExp;
 }
 
@@ -659,6 +699,7 @@ std::unique_ptr<AddExp> Parser::parseAddExp() {
     newLeft->mulExp = parseMulExp();
     addExp = std::move(newLeft);
   }
+  std::cout << "<AddExp>" << std::endl;
   return addExp;
 }
 
@@ -683,6 +724,7 @@ std::unique_ptr<RelExp> Parser::parseRelExp() {
     newLeft->addExp = parseAddExp();
     relExp = std::move(newLeft);
   }
+  std::cout << "<RelExp>" << std::endl;
   return relExp;
 }
 
@@ -702,6 +744,7 @@ std::unique_ptr<EqExp> Parser::parseEqExp() {
     newLeft->relExp = parseRelExp();
     eqExp = std::move(newLeft);
   }
+  std::cout << "<EqExp>" << std::endl;
   return eqExp;
 }
 
@@ -715,6 +758,7 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
     newLeft->eqExp = parseEqExp();
     lAndExp = std::move(newLeft);
   }
+  std::cout << "<LAndExp>" << std::endl;
   return lAndExp;
 }
 
@@ -728,11 +772,13 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
     newLeft->lAndExp = parseLAndExp();
     lOrExp = std::move(newLeft);
   }
+  std::cout << "<LOrExp>" << std::endl;
   return lOrExp;
 }
 
 std::unique_ptr<ConstExp> Parser::parseConstExp() {
   auto constExp = std::make_unique<ConstExp>();
   constExp->addExp = parseAddExp();
+  std::cout << "<ConstExp>" << std::endl;
   return constExp;
 }
