@@ -737,8 +737,8 @@ std::unique_ptr<MulExp> Parser::parseMulExp() {
 
   mulExp->unaryExp = parseUnaryExp();
   mulExp->op = MulExp::OpType::NONE;
-  if (lexer.peekToken(1).type == TokenType::MULT &&
-      lexer.peekToken(1).type == TokenType::DIV &&
+  if (lexer.peekToken(1).type == TokenType::MULT ||
+      lexer.peekToken(1).type == TokenType::DIV ||
       lexer.peekToken(1).type == TokenType::MOD) {
     advance();
   }
@@ -772,7 +772,7 @@ std::unique_ptr<AddExp> Parser::parseAddExp() {
   addExp->mulExp = parseMulExp();
   addExp->op = AddExp::OpType::NONE;
   // look ahead
-  if (lexer.peekToken(1).type == TokenType::PLUS &&
+  if (lexer.peekToken(1).type == TokenType::PLUS ||
       lexer.peekToken(1).type == TokenType::MINU) {
     advance();
   }
