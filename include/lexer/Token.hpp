@@ -41,7 +41,7 @@
   X(LBRACE)                                                                    \
   X(RBRACE)                                                                    \
   X(ASSIGN)                                                                    \
-  X(END_OF_FILE)                                                               \
+  X(EOFTK)                                                                     \
   X(UNKNOWN)
 
 #define X(name) name,

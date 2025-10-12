@@ -61,7 +61,7 @@ Token Lexer::nextToken() {
   int index;
   skipwhitespace();
   if (pos >= source.length()) {
-    return Token(TokenType::END_OF_FILE, "", line);
+    return Token(TokenType::EOFTK, "", line);
   }
   if (isdigit(source[pos])) {
     std::string digit;
