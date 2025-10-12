@@ -1,6 +1,6 @@
 .cache/
 build/
-*.zip/
+*.zip
 latex/
 html/
 zip.sh
