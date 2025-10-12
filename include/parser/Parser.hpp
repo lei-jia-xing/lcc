@@ -9,7 +9,6 @@ private:
   Lexer lexer;
   Token current;
   void advance();
-  bool match(TokenType type);
   inline static int silentDepth = 0;
 
 public:
@@ -22,7 +21,7 @@ public:
 
 private:
   std::unique_ptr<IfStmt> parseIfStmt();
-  std::unique_ptr<ForStmt> parseForStmtStmt();
+  std::unique_ptr<ForStmt> parseForStmt();
   std::unique_ptr<BreakStmt> parseBreakStmt();
   std::unique_ptr<ContinueStmt> parseContinueStmt();
   std::unique_ptr<ReturnStmt> parseReturnStmt();

@@ -15,14 +15,16 @@ void Lexer::skipwhitespace() {
   }
 }
 void Lexer::error(const int &line, const std::string errorType) {
-  std::cerr << line << " " << errorType << std::endl;
+  if (silentDepth == 0) {
+    std::cerr << line << " " << errorType << std::endl;
+  }
 }
 
 void Lexer::silentPV(bool silent) {
   if (silent) {
     silentDepth++;
   } else {
-    silentDepth--;
+    silentDepth > 0 ? silentDepth-- : silentDepth = 0;
   }
 }
 
@@ -30,6 +32,29 @@ void Lexer::output(const std::string &type, const std::string &value) {
   if (silentDepth == 0) {
     std::cout << type << " " << value << std::endl;
   }
+}
+
+Token Lexer::peekToken(int n) {
+  // 保存当前位置和行号
+  size_t savedPos = pos;
+  int savedLine = line;
+
+  // 临时增加静默深度，不输出peek的token
+  silentDepth++;
+  Token token;
+
+  // 连续获取n个token，返回最后一个
+  for (int i = 0; i < n; i++) {
+    token = nextToken();
+  }
+
+  silentDepth--;
+
+  // 恢复位置和行号
+  pos = savedPos;
+  line = savedLine;
+
+  return token;
 }
 
 Token Lexer::nextToken() {
