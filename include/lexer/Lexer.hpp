@@ -24,5 +24,5 @@ public:
   void silentPV(bool silent);
   void output(const std::string &type, const std::string &value);
 
-  Token peekToken(int n); // 向前看第n个token
+  Token peekToken(int n);
 };
