@@ -3,12 +3,16 @@
 #include "../lexer/Token.hpp"
 #include "AST.hpp"
 #include <memory>
+#include <vector>
 
 class Parser {
 private:
   Lexer lexer;
   Token current;
   void advance();
+  bool expect(const std::vector<TokenType> &types,
+              const std::string &errorType);
+  void sync(const std::vector<TokenType> &types);
   inline static int silentDepth = 0;
 
 public:
