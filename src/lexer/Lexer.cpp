@@ -65,6 +65,7 @@ Token Lexer::nextToken() {
       digit.push_back(source[index]);
     }
     pos = index;
+    output("INTCON", digit);
     return Token(TokenType::INTCON, digit, line, std::stoi(digit));
 
   } else if (isalpha(source[pos]) || source[pos] == '_') {
@@ -76,8 +77,11 @@ Token Lexer::nextToken() {
     }
     pos = index;
     if (reserveWords.find(word) != reserveWords.end()) {
+      auto token = Token(reserveWords[word], word, line);
+      output(token.getTokenType(), word);
       return Token(reserveWords[word], word, line);
     } else {
+      output("IDENFR", word);
       return Token(TokenType::IDENFR, word, line, word);
     }
   }
@@ -88,11 +92,13 @@ Token Lexer::nextToken() {
       return Token(TokenType::NEQ, "!=", line);
     }
     pos++;
+    output("NOT", "!");
     return Token(TokenType::NOT, "!", line);
   }
   case '&': {
     if (pos + 1 < source.length() && source[pos + 1] == '&') {
       pos += 2;
+      output("AND", "&&");
       return Token(TokenType::AND, "&&", line);
     }
     pos++;
@@ -102,6 +108,7 @@ Token Lexer::nextToken() {
   case '|': {
     if (pos + 1 < source.length() && source[pos + 1] == '|') {
       pos += 2;
+      output("OR", "||");
       return Token(TokenType::OR, "||", line);
     }
     pos++;
@@ -110,14 +117,17 @@ Token Lexer::nextToken() {
   }
   case '+': {
     pos++;
+    output("PLUS", "+");
     return Token(TokenType::PLUS, "+", line);
   }
   case '-': {
     pos++;
+    output("MINU", "-");
     return Token(TokenType::MINU, "-", line);
   }
   case '*': {
     pos++;
+    output("MULT", "*");
     return Token(TokenType::MULT, "*", line);
   }
   case '/': {
@@ -140,66 +150,82 @@ Token Lexer::nextToken() {
       return nextToken();
     }
     pos++;
+    output("DIV", "/");
     return Token(TokenType::DIV, "/", line);
   }
   case '%': {
     pos++;
+    output("MOD", "%");
     return Token(TokenType::MOD, "%", line);
   }
   case '<': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
+      output("LEQ", "<=");
       return Token(TokenType::LEQ, "<=", line);
     }
     pos++;
+    output("LSS", "<");
     return Token(TokenType::LSS, "<", line);
   }
   case '>': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
+      output("GEQ", ">=");
       return Token(TokenType::GEQ, ">=", line);
     }
     pos++;
+    output("GRE", ">");
     return Token(TokenType::GRE, ">", line);
   }
   case '=': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
+      output("EQL", "==");
       return Token(TokenType::EQL, "==", line);
     }
     pos++;
+    output("ASSIGN", "=");
     return Token(TokenType::ASSIGN, "=", line);
   }
   case ';': {
     pos++;
+    output("SEMICN", ";");
     return Token(TokenType::SEMICN, ";", line);
   }
   case ',': {
     pos++;
+    output("COMMA", ",");
     return Token(TokenType::COMMA, ",", line);
   }
   case '(': {
     pos++;
+    output("LPARENT", "(");
     return Token(TokenType::LPARENT, "(", line);
   }
   case ')': {
     pos++;
+    output("RPARENT", ")");
     return Token(TokenType::RPARENT, ")", line);
   }
   case '[': {
     pos++;
+    output("LBRACK", "[");
     return Token(TokenType::LBRACK, "[", line);
   }
   case ']': {
     pos++;
+    output("RBRACK", "]");
     return Token(TokenType::RBRACK, "]", line);
   }
   case '{': {
     pos++;
+    output("LBRACE", "{");
     return Token(TokenType::LBRACE, "{", line);
   }
   case '}': {
     pos++;
+    output("RBRACE", "}");
     return Token(TokenType::RBRACE, "}", line);
   }
   case '"': {
@@ -212,6 +238,7 @@ Token Lexer::nextToken() {
     }
     strcon.push_back('"');
     pos = index + 1;
+    output("STRCON", strcon);
     return Token(TokenType::STRCON, strcon, line, strcon);
   }
 
