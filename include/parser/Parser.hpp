@@ -9,6 +9,7 @@ class Parser {
 private:
   Lexer lexer;
   Token current;
+  int lastVnline = 0;
   void advance();
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);

@@ -5,7 +5,7 @@
 #include <memory>
 
 Parser::Parser(Lexer &&lexer, Token current)
-    : lexer(std::move(lexer)), current(current) {}
+    : lexer(std::move(lexer)), current(current), lastVnline(0) {}
 void Parser::silentPV(bool silent) {
   if (silent) {
     silentDepth++;
@@ -31,7 +31,7 @@ bool Parser::expect(const std::vector<TokenType> &types,
     }
   }
   if (!matched) {
-    error(current.line, errorType);
+    error(lastVnline, errorType);
     return false;
   } else {
     advance();
@@ -76,6 +76,7 @@ void Parser::error(const int &line, const std::string errorType) {
 std::unique_ptr<CompUnit> Parser::parseCompUnit() {
   auto compUnit = std::make_unique<CompUnit>();
   compUnit->line = current.line;
+  lastVnline = current.line;
   while (current.type == TokenType::CONSTTK ||
          current.type == TokenType::INTTK ||
          current.type == TokenType::STATICTK) {
@@ -113,6 +114,7 @@ std::unique_ptr<CompUnit> Parser::parseCompUnit() {
 std::unique_ptr<Decl> Parser::parseDecl() {
   auto decl = std::make_unique<Decl>();
   decl->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::CONSTTK) {
     decl = parseConstDecl();
   } else {
@@ -124,6 +126,7 @@ std::unique_ptr<Decl> Parser::parseDecl() {
 std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
   auto constDecl = std::make_unique<ConstDecl>();
   constDecl->line = current.line;
+  lastVnline = current.line;
   advance(); // eat const
   constDecl->bType = parseBType();
   advance();
@@ -141,6 +144,7 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
 std::unique_ptr<VarDecl> Parser::parseVarDecl() {
   auto varDecl = std::make_unique<VarDecl>();
   varDecl->line = current.line;
+  lastVnline = current.line;
   varDecl->isStatic = false;
   if (current.type == TokenType::STATICTK) {
     varDecl->isStatic = true;
@@ -162,6 +166,7 @@ std::unique_ptr<VarDecl> Parser::parseVarDecl() {
 std::unique_ptr<BType> Parser::parseBType() {
   auto bType = std::make_unique<BType>();
   bType->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::INTTK) {
     bType->type = "int";
   } else {
@@ -173,24 +178,38 @@ std::unique_ptr<BType> Parser::parseBType() {
 std::unique_ptr<ConstDef> Parser::parseConstDef() {
   auto constDef = std::make_unique<ConstDef>();
   constDef->line = current.line;
+  lastVnline = current.line;
   constDef->ident = current.lexeme;
   advance(); // eat ident
   if (current.type == TokenType::LBRACK) {
     advance(); // eat lbrack
     constDef->arraySize = parseConstExp();
+    if (constDef->arraySize == nullptr) {
+      sync({TokenType::RBRACK});
+    }
     expect({TokenType::RBRACK}, "k");
     advance(); // eat rbrack
     if (current.type != TokenType::ASSIGN) {
       // error();
     }
     advance(); // eat assign
-    constDef->constinitVal = parseConstInitVal();
+    auto constInitVal = parseConstInitVal();
+    if (constInitVal == nullptr) {
+      sync({TokenType::COMMA, TokenType::SEMICN});
+    } else {
+      constDef->constinitVal = std::move(constInitVal);
+    }
     output("<ConstDef>");
     return constDef;
 
   } else if (current.type == TokenType::ASSIGN) {
     advance(); // eat assign
-    constDef->constinitVal = parseConstInitVal();
+    auto constInitVal = parseConstInitVal();
+    if (constInitVal == nullptr) {
+      sync({TokenType::COMMA, TokenType::SEMICN});
+    } else {
+      constDef->constinitVal = std::move(constInitVal);
+    }
     output("<ConstDef>");
     return constDef;
   } else {
@@ -203,24 +222,38 @@ std::unique_ptr<ConstDef> Parser::parseConstDef() {
 std::unique_ptr<VarDef> Parser::parseVarDef() {
   auto varDef = std::make_unique<VarDef>();
   varDef->line = current.line;
+  lastVnline = current.line;
   varDef->ident = current.lexeme;
   if (lexer.peekToken(1).type == TokenType::LBRACK) {
     advance(); // eat ident
     advance(); // eat lbrack
     varDef->arraySize = parseConstExp();
+    if (varDef->arraySize == nullptr) {
+      sync({TokenType::RBRACK});
+    }
     expect({TokenType::RBRACK}, "k");
     varDef->initVal = nullptr;
     if (lexer.peekToken(1).type == TokenType::ASSIGN) {
       advance(); // eat rbrack
       advance(); // eat assign
-      varDef->initVal = parseInitVal();
+      auto initVal = parseInitVal();
+      if (initVal == nullptr) {
+        sync({TokenType::COMMA, TokenType::SEMICN});
+      } else {
+        varDef->initVal = std::move(initVal);
+      }
     }
     output("<VarDef>");
     return varDef;
   } else if (lexer.peekToken(1).type == TokenType::ASSIGN) {
     advance(); // eat ident
     advance(); // eat assign
-    varDef->initVal = parseInitVal();
+    auto initVal = parseInitVal();
+    if (initVal == nullptr) {
+      sync({TokenType::COMMA, TokenType::SEMICN});
+    } else {
+      varDef->initVal = std::move(initVal);
+    }
     output("<VarDef>");
     return varDef;
   } else {
@@ -232,15 +265,26 @@ std::unique_ptr<VarDef> Parser::parseVarDef() {
 std::unique_ptr<ConstInitVal> Parser::parseConstInitVal() {
   auto constInitVal = std::make_unique<ConstInitVal>();
   constInitVal->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::LBRACE) {
     constInitVal->isArray = true;
     advance(); // eat lbrace
     if (current.type != TokenType::RBRACE) {
-      constInitVal->arrayExps.push_back(parseConstExp());
+      auto constExp = parseConstExp();
+      if (constExp == nullptr) {
+        sync({TokenType::COMMA, TokenType::RBRACE});
+      } else {
+        constInitVal->arrayExps.push_back(std::move(constExp));
+      }
       advance();
       while (current.type == TokenType::COMMA) {
         advance(); // eat comma
-        constInitVal->arrayExps.push_back(parseConstExp());
+        auto constExp = parseConstExp();
+        if (constExp == nullptr) {
+          sync({TokenType::COMMA, TokenType::RBRACE});
+        } else {
+          constInitVal->arrayExps.push_back(std::move(constExp));
+        }
         advance();
       }
     }
@@ -248,7 +292,12 @@ std::unique_ptr<ConstInitVal> Parser::parseConstInitVal() {
       // error();
     }
   } else {
-    constInitVal->exp = parseConstExp();
+    auto constExp = parseConstExp();
+    if (constExp == nullptr) {
+      return nullptr;
+    } else {
+      constInitVal->exp = std::move(constExp);
+    }
   }
   output("<ConstInitVal>");
   return constInitVal;
@@ -257,15 +306,26 @@ std::unique_ptr<ConstInitVal> Parser::parseConstInitVal() {
 std::unique_ptr<InitVal> Parser::parseInitVal() {
   auto initVal = std::make_unique<InitVal>();
   initVal->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::LBRACE) {
     initVal->isArray = true;
     advance(); // eat lbrace
     if (current.type != TokenType::RBRACE) {
-      initVal->arrayExps.push_back(parseExp());
+      auto exp = parseExp();
+      if (exp == nullptr) {
+        sync({TokenType::COMMA, TokenType::RBRACE});
+      } else {
+        initVal->arrayExps.push_back(std::move(exp));
+      }
       advance();
       while (current.type == TokenType::COMMA) {
         advance(); // eat comma
-        initVal->arrayExps.push_back(parseExp());
+        auto exp = parseExp();
+        if (exp == nullptr) {
+          sync({TokenType::COMMA, TokenType::RBRACE});
+        } else {
+          initVal->arrayExps.push_back(std::move(exp));
+        }
         advance();
       }
     }
@@ -273,7 +333,12 @@ std::unique_ptr<InitVal> Parser::parseInitVal() {
       // error();
     }
   } else {
-    initVal->exp = parseExp();
+    auto exp = parseExp();
+    if (exp == nullptr) {
+      return nullptr;
+    } else {
+      initVal->exp = std::move(exp);
+    }
   }
   output("<InitVal>");
   return initVal;
@@ -282,6 +347,7 @@ std::unique_ptr<InitVal> Parser::parseInitVal() {
 std::unique_ptr<FuncDef> Parser::parseFuncDef() {
   auto funcDef = std::make_unique<FuncDef>();
   funcDef->line = current.line;
+  lastVnline = current.line;
   funcDef->funcType = parseFuncType();
   advance();
   funcDef->ident = current.lexeme;
@@ -303,6 +369,7 @@ std::unique_ptr<FuncDef> Parser::parseFuncDef() {
 std::unique_ptr<MainFuncDef> Parser::parseMainFuncDef() {
   auto mainFuncDef = std::make_unique<MainFuncDef>();
   mainFuncDef->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::INTTK) {
     // error();
   }
@@ -324,7 +391,7 @@ std::unique_ptr<MainFuncDef> Parser::parseMainFuncDef() {
 std::unique_ptr<FuncType> Parser::parseFuncType() {
   auto funcType = std::make_unique<FuncType>();
   funcType->line = current.line;
-  funcType->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::VOIDTK) {
     funcType->type = "void";
     funcType->line = current.line;
@@ -341,6 +408,7 @@ std::unique_ptr<FuncType> Parser::parseFuncType() {
 std::unique_ptr<FuncFParams> Parser::parseFuncFParams() {
   auto funcFParams = std::make_unique<FuncFParams>();
   funcFParams->line = current.line;
+  lastVnline = current.line;
   funcFParams->params.push_back(parseFuncFParam());
   if (lexer.peekToken(1).type == TokenType::COMMA) {
     advance();
@@ -359,6 +427,7 @@ std::unique_ptr<FuncFParams> Parser::parseFuncFParams() {
 std::unique_ptr<FuncFParam> Parser::parseFuncFParam() {
   auto funcFParam = std::make_unique<FuncFParam>();
   funcFParam->line = current.line;
+  lastVnline = current.line;
   funcFParam->bType = parseBType();
   advance();
   funcFParam->ident = current.lexeme;
@@ -375,6 +444,7 @@ std::unique_ptr<FuncFParam> Parser::parseFuncFParam() {
 std::unique_ptr<Block> Parser::parseBlock() {
   auto block = std::make_unique<Block>();
   block->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::LBRACE) {
     // error();
   }
@@ -397,6 +467,7 @@ std::unique_ptr<Block> Parser::parseBlock() {
 std::unique_ptr<BlockItem> Parser::parseBlockItem() {
   auto blockItem = std::make_unique<BlockItem>();
   blockItem->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::CONSTTK || current.type == TokenType::INTTK ||
       current.type == TokenType::STATICTK) {
     blockItem->decl = parseDecl();
@@ -409,6 +480,7 @@ std::unique_ptr<BlockItem> Parser::parseBlockItem() {
 std::unique_ptr<IfStmt> Parser::parseIfStmt() {
   auto ifStmt = std::make_unique<IfStmt>();
   ifStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::IFTK) {
     // error();
   }
@@ -464,6 +536,7 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
 std::unique_ptr<ForStmt> Parser::parseForStmt() {
   auto forStmt = std::make_unique<ForStmt>();
   forStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::FORTK) {
     // error();
   }
@@ -506,6 +579,7 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
 std::unique_ptr<BreakStmt> Parser::parseBreakStmt() {
   auto breakStmt = std::make_unique<BreakStmt>();
   breakStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::BREAKTK) {
     // error();
   }
@@ -516,6 +590,7 @@ std::unique_ptr<BreakStmt> Parser::parseBreakStmt() {
 std::unique_ptr<ContinueStmt> Parser::parseContinueStmt() {
   auto continueStmt = std::make_unique<ContinueStmt>();
   continueStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::CONTINUETK) {
     // error();
   }
@@ -526,6 +601,7 @@ std::unique_ptr<ContinueStmt> Parser::parseContinueStmt() {
 std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
   auto returnStmt = std::make_unique<ReturnStmt>();
   returnStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::RETURNTK) {
     // error();
   }
@@ -546,6 +622,7 @@ std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
 std::unique_ptr<PrintfStmt> Parser::parsePrintfStmt() {
   auto printfStmt = std::make_unique<PrintfStmt>();
   printfStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::PRINTFTK) {
     // error();
   }
@@ -577,6 +654,7 @@ std::unique_ptr<PrintfStmt> Parser::parsePrintfStmt() {
 std::unique_ptr<AssignStmt> Parser::parseAssignStmt() {
   auto assignStmt = std::make_unique<AssignStmt>();
   assignStmt->line = current.line;
+  lastVnline = current.line;
   assignStmt->lval = parseLVal();
   advance();
   if (current.type != TokenType::ASSIGN) {
@@ -597,6 +675,7 @@ std::unique_ptr<AssignStmt> Parser::parseAssignStmt() {
 std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
   auto expStmt = std::make_unique<ExpStmt>();
   expStmt->line = current.line;
+  lastVnline = current.line;
   if (current.type != TokenType::SEMICN) {
     auto parsedExp = parseExp();
     if (parsedExp == nullptr) {
@@ -613,6 +692,7 @@ std::unique_ptr<ExpStmt> Parser::parseExpStmt() {
 std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
   auto blockStmt = std::make_unique<BlockStmt>();
   blockStmt->line = current.line;
+  lastVnline = current.line;
   blockStmt->block = parseBlock();
   output("<Stmt>");
   return blockStmt;
@@ -660,6 +740,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
 std::unique_ptr<ForAssignStmt> Parser::parseForAssignStmt() {
   auto forAssignStmt = std::make_unique<ForAssignStmt>();
   forAssignStmt->line = current.line;
+  lastVnline = current.line;
   auto lval = parseLVal();
   advance();
   if (current.type != TokenType::ASSIGN) {
@@ -700,6 +781,7 @@ std::unique_ptr<ForAssignStmt> Parser::parseForAssignStmt() {
 std::unique_ptr<Exp> Parser::parseExp() {
   auto exp = std::make_unique<Exp>();
   exp->line = current.line;
+  lastVnline = current.line;
   auto add = parseAddExp();
   if (add == nullptr) {
     return nullptr;
@@ -712,6 +794,7 @@ std::unique_ptr<Exp> Parser::parseExp() {
 std::unique_ptr<Cond> Parser::parseCond() {
   auto cond = std::make_unique<Cond>();
   cond->line = current.line;
+  lastVnline = current.line;
   auto LOrExp = parseLOrExp();
   if (LOrExp == nullptr) {
     return nullptr;
@@ -724,6 +807,7 @@ std::unique_ptr<Cond> Parser::parseCond() {
 std::unique_ptr<LVal> Parser::parseLVal() {
   auto lVal = std::make_unique<LVal>();
   lVal->line = current.line;
+  lastVnline = current.line;
   lVal->ident = current.lexeme;
   lVal->arrayIndex = nullptr;
   if (lexer.peekToken(1).type == TokenType::LBRACK) {
@@ -739,6 +823,7 @@ std::unique_ptr<LVal> Parser::parseLVal() {
 std::unique_ptr<PrimaryExp> Parser::parsePrimaryExp() {
   auto primaryExp = std::make_unique<PrimaryExp>();
   primaryExp->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::LPARENT) {
     primaryExp->primaryType = PrimaryExp::PrimaryType::EXP;
     advance();
@@ -760,6 +845,7 @@ std::unique_ptr<PrimaryExp> Parser::parsePrimaryExp() {
 std::unique_ptr<Number> Parser::parseNumber() {
   auto number = std::make_unique<Number>();
   number->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::INTCON) {
     number->value = std::get<int>(current.value);
   }
@@ -770,6 +856,7 @@ std::unique_ptr<Number> Parser::parseNumber() {
 std::unique_ptr<UnaryExp> Parser::parseUnaryExp() {
   auto unaryExp = std::make_unique<UnaryExp>();
   unaryExp->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::PLUS || current.type == TokenType::MINU ||
       current.type == TokenType::NOT) {
     // UnaryExp -> UnaryOp UnaryExp
@@ -808,6 +895,7 @@ std::unique_ptr<UnaryExp> Parser::parseUnaryExp() {
 std::unique_ptr<UnaryOp> Parser::parseUnaryOp() {
   auto unaryOp = std::make_unique<UnaryOp>();
   unaryOp->line = current.line;
+  lastVnline = current.line;
   if (current.type == TokenType::PLUS) {
     unaryOp->op = UnaryOp::OpType::PLUS;
   } else if (current.type == TokenType::MINU) {
@@ -824,6 +912,7 @@ std::unique_ptr<UnaryOp> Parser::parseUnaryOp() {
 std::unique_ptr<FuncRParams> Parser::parseFuncRParams() {
   auto funcRParams = std::make_unique<FuncRParams>();
   funcRParams->line = current.line;
+  lastVnline = current.line;
   funcRParams->exps.push_back(parseExp());
   if (lexer.peekToken(1).type == TokenType::COMMA) {
     advance();
@@ -849,6 +938,7 @@ std::unique_ptr<FuncRParams> Parser::parseFuncRParams() {
 std::unique_ptr<MulExp> Parser::parseMulExp() {
   auto mulExp = std::make_unique<MulExp>();
   mulExp->line = current.line;
+  lastVnline = current.line;
   auto unaryExp = parseUnaryExp();
   if (unaryExp == nullptr) {
     return nullptr;
@@ -901,6 +991,7 @@ std::unique_ptr<MulExp> Parser::parseMulExp() {
 std::unique_ptr<AddExp> Parser::parseAddExp() {
   auto addExp = std::make_unique<AddExp>();
   addExp->line = current.line;
+  lastVnline = current.line;
   auto mulExp = parseMulExp();
   if (mulExp == nullptr) {
     return nullptr;
@@ -949,6 +1040,7 @@ std::unique_ptr<AddExp> Parser::parseAddExp() {
 std::unique_ptr<RelExp> Parser::parseRelExp() {
   auto relExp = std::make_unique<RelExp>();
   relExp->line = current.line;
+  lastVnline = current.line;
   auto addExp = parseAddExp();
   if (addExp == nullptr) {
     return nullptr;
@@ -1005,6 +1097,7 @@ std::unique_ptr<RelExp> Parser::parseRelExp() {
 std::unique_ptr<EqExp> Parser::parseEqExp() {
   auto eqExp = std::make_unique<EqExp>();
   eqExp->line = current.line;
+  lastVnline = current.line;
   auto relExp = parseRelExp();
   if (relExp == nullptr) {
     return nullptr;
@@ -1052,6 +1145,7 @@ std::unique_ptr<EqExp> Parser::parseEqExp() {
 std::unique_ptr<LAndExp> Parser::parseLAndExp() {
   auto lAndExp = std::make_unique<LAndExp>();
   lAndExp->line = current.line;
+  lastVnline = current.line;
   auto eqExp = parseEqExp();
   if (eqExp == nullptr) {
     return nullptr;
@@ -1091,6 +1185,7 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
 std::unique_ptr<LOrExp> Parser::parseLOrExp() {
   auto lOrExp = std::make_unique<LOrExp>();
   lOrExp->line = current.line;
+  lastVnline = current.line;
   auto lAndExp = parseLAndExp();
   if (lAndExp == nullptr) {
     return nullptr;
@@ -1130,6 +1225,7 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
 std::unique_ptr<ConstExp> Parser::parseConstExp() {
   auto constExp = std::make_unique<ConstExp>();
   constExp->line = current.line;
+  lastVnline = current.line;
   auto addExp = parseAddExp();
   if (addExp == nullptr) {
     return nullptr;
