@@ -89,6 +89,7 @@ Token Lexer::nextToken() {
   case '!': {
     if (pos + 1 < source.length() && source[pos + 1] == '=') {
       pos += 2;
+      output("NEQ", "!=");
       return Token(TokenType::NEQ, "!=", line);
     }
     pos++;
