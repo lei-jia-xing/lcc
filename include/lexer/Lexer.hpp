@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief header file for lexer
+ * @brief header file for lexer definition
  */
 
 #pragma once
