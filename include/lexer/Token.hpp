@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief header file for token definition
+ */
+
 #pragma once
 #include <string>
 #include <variant>
@@ -50,17 +55,38 @@ enum class TokenType { TOKEN_LIST };
 
 class Token {
 public:
+  /**
+   * @brief the type of token
+   */
   TokenType type;
+  /**
+   * @brief the lexeme of token
+   */
   std::string lexeme;
+  /**
+   * @brief the line number of token in source code
+   */
   int line;
   std::variant<std::monostate, int, std::string> value;
 
+  /**
+   * @brief constructor for Token
+   *
+   * @param type initial type of token. default to UNKNOWN
+   * @param lexeme initial lexeme of token, default to empty string
+   * @param line initial line number of token in source code, default to 1
+   * @param value value of token(int for INTCON, string for STRCON), default to
+   * monostate
+   */
   Token(TokenType type = TokenType::UNKNOWN, std::string lexeme = "",
         int line = 1, std::variant<std::monostate, int, std::string> value = {})
       : type(type), lexeme(lexeme), line(line), value(value) {}
   std::variant<std::monostate, int, std::string> getToken() const {
     return value;
   }
+  /**
+   * @brief a function to get string representation of token type
+   */
   std::string getTokenType() {
     switch (type) {
 #define X(name)                                                                \
