@@ -13,6 +13,7 @@ private:
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);
   void sync(const std::vector<TokenType> &types);
+  void syncIfCond();
   inline static int silentDepth = 0;
 
 public:

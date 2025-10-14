@@ -1,6 +1,8 @@
 #pragma once
+#include <lexer/Token.hpp>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class ASTNode;
@@ -247,6 +249,10 @@ public:
     RETURN,
     PRINTF
   };
+  inline static std::unordered_set<TokenType> FIRST = {
+      TokenType::IFTK,       TokenType::FORTK,    TokenType::BREAKTK,
+      TokenType::CONTINUETK, TokenType::RETURNTK, TokenType::PRINTFTK,
+      TokenType::LBRACE,     TokenType::IDENFR,   TokenType::SEMICN};
 
   StmtType stmtType;
 };
