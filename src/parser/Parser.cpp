@@ -58,18 +58,6 @@ void Parser::sync(const std::vector<TokenType> &types) {
   silentPV(false);
 }
 
-void Parser::syncIfCond() {
-  silentPV(true);
-  while (lexer.peekToken(2).type != TokenType::EOFTK) {
-    auto t = lexer.peekToken(2).type;
-    if (t == TokenType::ELSETK || Stmt::FIRST.count(t)) {
-      silentPV(false);
-      return;
-    }
-    advance();
-  }
-  silentPV(false);
-}
 void Parser::error(const int &line, const std::string errorType) {
   std::cerr << line << " " << errorType << std::endl;
 }
@@ -491,36 +479,17 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
   advance(); // eat lparent
   ifStmt->cond = parseCond();
   if (ifStmt->cond == nullptr) {
-    syncIfCond();
-  }
-  bool ateRParen = false;
-  if (ifStmt->cond != nullptr) {
-    expect({TokenType::RPARENT}, "j");
-    advance(); // eat rparent
-    ateRParen = true;
-  } else if (lexer.peekToken(1).type == TokenType::RPARENT) {
-    expect({TokenType::RPARENT}, "j");
-    advance(); // eat rparent
-    ateRParen = true;
+    sync({TokenType::IFTK, TokenType::FORTK, TokenType::BREAKTK,
+          TokenType::CONTINUETK, TokenType::RETURNTK, TokenType::PRINTFTK,
+          TokenType::LBRACE, TokenType::IDENFR, TokenType::SEMICN,
+          TokenType::PLUS, TokenType::MINU, TokenType::NOT, TokenType::LPARENT,
+          TokenType::INTCON});
   } else {
-    // missing ')', do not advance here; proceed based on next token
+    expect({TokenType::RPARENT}, "j");
   }
-
-  ifStmt->elseStmt = nullptr;
-
-  // If next token is 'else', treat then-statement as missing and parse
-  // else-part
-  if (current.type == TokenType::ELSETK) {
-    advance(); // eat else
-    ifStmt->elseStmt = parseStmt();
-    output("<Stmt>");
-    return ifStmt;
-  }
-
-  // Otherwise parse then-statement starting at current
+  advance();
   ifStmt->thenStmt = parseStmt();
 
-  // Handle optional else; cover both lookahead and current cases
   if (lexer.peekToken(1).type == TokenType::ELSETK) {
     advance();
     advance(); // eat else
@@ -750,6 +719,7 @@ std::unique_ptr<ForAssignStmt> Parser::parseForAssignStmt() {
   auto exp = parseExp();
   if (exp == nullptr) {
     sync({TokenType::COMMA, TokenType::SEMICN, TokenType::RPARENT});
+    return nullptr;
   } else {
     forAssignStmt->assignments.push_back({std::move(lval), std::move(exp)});
   }
@@ -767,6 +737,7 @@ std::unique_ptr<ForAssignStmt> Parser::parseForAssignStmt() {
     auto exp = parseExp();
     if (exp == nullptr) {
       sync({TokenType::COMMA, TokenType::SEMICN, TokenType::RPARENT});
+      return nullptr;
     } else {
       forAssignStmt->assignments.push_back({std::move(lval), std::move(exp)});
     }
@@ -928,6 +899,7 @@ std::unique_ptr<FuncRParams> Parser::parseFuncRParams() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT});
       return nullptr;
     }
   }
@@ -952,6 +924,7 @@ std::unique_ptr<MulExp> Parser::parseMulExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT, TokenType::SEMICN});
     return nullptr;
   }
 
@@ -981,6 +954,7 @@ std::unique_ptr<MulExp> Parser::parseMulExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT, TokenType::SEMICN});
       return nullptr;
     }
   }
@@ -1005,6 +979,7 @@ std::unique_ptr<AddExp> Parser::parseAddExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT, TokenType::SEMICN});
     return nullptr;
   }
 
@@ -1030,6 +1005,7 @@ std::unique_ptr<AddExp> Parser::parseAddExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT, TokenType::SEMICN});
       return nullptr;
     }
   }
@@ -1056,6 +1032,7 @@ std::unique_ptr<RelExp> Parser::parseRelExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT});
     return nullptr;
   }
   while (current.type == TokenType::LSS || current.type == TokenType::LEQ ||
@@ -1087,6 +1064,7 @@ std::unique_ptr<RelExp> Parser::parseRelExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT});
       return nullptr;
     }
   }
@@ -1111,6 +1089,7 @@ std::unique_ptr<EqExp> Parser::parseEqExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT});
     return nullptr;
   }
   while (current.type == TokenType::EQL || current.type == TokenType::NEQ) {
@@ -1135,6 +1114,7 @@ std::unique_ptr<EqExp> Parser::parseEqExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT});
       return nullptr;
     }
   }
@@ -1157,6 +1137,7 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT});
     return nullptr;
   }
   while (current.type == TokenType::AND) {
@@ -1175,6 +1156,7 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT});
       return nullptr;
     }
   }
@@ -1197,6 +1179,7 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
     advance();
   } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
     advance();
+    sync({TokenType::RPARENT});
     return nullptr;
   }
   while (current.type == TokenType::OR) {
@@ -1215,6 +1198,7 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
       advance();
     } else if (lexer.peekToken(1).type == TokenType::UNKNOWN) {
       advance();
+      sync({TokenType::RPARENT});
       return nullptr;
     }
   }
