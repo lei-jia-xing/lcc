@@ -114,13 +114,47 @@ public:
 使用宏定义自动生成 Token 类型枚举，确保代码的一致性和可维护性：
 
 ```cpp
-#define TOKEN_LIST \
-    X(IDENFR)    // 标识符
-    X(INTCON)    // 整型常量
-    X(STRCON)    // 字符串常量
-    X(CONSTTK)   // const 关键字
-    X(INTTK)     // int 关键字
-    // ... 更多 Token 类型
+#define TOKEN_LIST                                                             \
+  X(IDENFR)                                                                    \
+  X(INTCON)                                                                    \
+  X(STRCON)                                                                    \
+  X(CONSTTK)                                                                   \
+  X(INTTK)                                                                     \
+  X(STATICTK)                                                                  \
+  X(BREAKTK)                                                                   \
+  X(CONTINUETK)                                                                \
+  X(IFTK)                                                                      \
+  X(MAINTK)                                                                    \
+  X(ELSETK)                                                                    \
+  X(NOT)                                                                       \
+  X(AND)                                                                       \
+  X(OR)                                                                        \
+  X(FORTK)                                                                     \
+  X(RETURNTK)                                                                  \
+  X(VOIDTK)                                                                    \
+  X(PLUS)                                                                      \
+  X(MINU)                                                                      \
+  X(PRINTFTK)                                                                  \
+  X(MULT)                                                                      \
+  X(DIV)                                                                       \
+  X(MOD)                                                                       \
+  X(LSS)                                                                       \
+  X(LEQ)                                                                       \
+  X(GRE)                                                                       \
+  X(GEQ)                                                                       \
+  X(EQL)                                                                       \
+  X(NEQ)                                                                       \
+  X(SEMICN)                                                                    \
+  X(COMMA)                                                                     \
+  X(LPARENT)                                                                   \
+  X(RPARENT)                                                                   \
+  X(LBRACK)                                                                    \
+  X(RBRACK)                                                                    \
+  X(LBRACE)                                                                    \
+  X(RBRACE)                                                                    \
+  X(ASSIGN)                                                                    \
+  X(EOFTK)                                                                     \
+  X(UNKNOWN)
 ```
 
 ### 词法分析流程
@@ -139,9 +173,10 @@ public:
 
 ### 静默模式
 
-此Parser设计了一个名为`silentDepth`的静默深度变量（也可以说是静默引用变量）,为什么需要设置设个引用计数呢？
-因为lcc的前端目标是设计成流式的，在Parser使用向前看过程中，我们必须要要把静默模式关掉，同时为了可拓展性，
-我们允许多层静默嵌套,只有当silentDepth为0时，才允许输出和错误打印
+此`lexer`设计了一个名为`silentDepth`的静默深度变量（也可以说是静默引用变量）,为什么需要设置成引用计数而不是一个bool数呢？
+因为lcc的前端目标是设计成流式处理的，在`Parser`使用向前看过程中，我们必须要要把静默模式关掉，同时为了可拓展性，我们允许
+多层静默嵌套,只有当`silentDepth`为`0`时，才允许输出和错误打印。
+
 ```c++
 void Lexer::silentPV(bool silent) {
   if (silent) {
@@ -176,4 +211,3 @@ Lexer 主要识别以下错误：
 ```
 
 表示第 5 行出现非法字符错误。
-

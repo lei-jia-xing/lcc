@@ -6,14 +6,14 @@ A simple compiler for a C-like language, built from scratch using C++17 and CMak
 
 This project is currently under development. The progress of each major component is tracked below:
 
--   **Frontend**
-    -   [x] Lexical Analysis (Lexer)
-    -   [ ] Parsing (Parser)
-    -   [ ] Abstract Syntax Tree (AST) Generation
-    -   [ ] Semantic Analysis
-    -   [ ] Intermediate Representation (IR) Generation
--   **Backend**
-    -   [ ] MIPS Assembly Generation
+- **Frontend**
+  - [x] Lexical Analysis (Lexer)
+  - [x] Parsing (Parser)
+  - [ ] Abstract Syntax Tree (AST) Generation
+  - [ ] Semantic Analysis
+  - [ ] Intermediate Representation (IR) Generation
+- **Backend**
+  - [ ] MIPS Assembly Generation
 
 ## Language Grammar
 
@@ -23,30 +23,34 @@ The compiler supports a subset of the C language, including basic types, variabl
 
 ### Prerequisites
 
--   [CMake](https://cmake.org/) (version 3.10 or higher)
--   A C++ compiler that supports C++17 (e.g., GCC, Clang)
--   [Make](https://www.gnu.org/software/make/) (or another build system like Ninja)
+- [CMake](https://cmake.org/) (version 3.10 or higher)
+- A C++ compiler that supports C++17 (e.g., GCC, Clang)
+- [Make](https://www.gnu.org/software/make/) (or another build system like Ninja)
 
 ### Building the Project
 
-1.  **Clone the repository:**
+1. **Clone the repository:**
+
     ```bash
     git clone <your-repository-url>
     cd lcc
     ```
 
-2.  **Create a build directory:**
+2. **Create a build directory:**
+
     ```bash
     mkdir build
     cd build
     ```
 
-3.  **Configure the project with CMake:**
+3. **Configure the project with CMake:**
+
     ```bash
     cmake ..
     ```
 
-4.  **Compile the source code:**
+4. **Compile the source code:**
+
     ```bash
     make
     ```
@@ -56,10 +60,12 @@ The compiler supports a subset of the C language, including basic types, variabl
 After a successful build, the executable `Compiler` will be located in the `build` directory.
 
 To compile a source file, run:
+
 ```bash
-./Compiler <path/to/your/sourcefile.c>
+./Compiler
 ```
 
 ## License
 
 This project is licensed under the terms of the [LICENSE](LICENSE) file.
+

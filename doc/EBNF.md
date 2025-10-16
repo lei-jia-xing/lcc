@@ -1,3 +1,5 @@
+# LCC 编译器 - EBNF 语法定义
+
 - 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
 - 声明 Decl → ConstDecl | VarDecl
 - 常量声明 ConstDecl → 'const' BType ConstDef { ',' ConstDef } ';' // i
