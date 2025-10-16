@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief a header for parser definition
+ */
+
 #pragma once
 #include "../lexer/Lexer.hpp"
 #include "../lexer/Token.hpp"
@@ -5,22 +10,73 @@
 #include <memory>
 #include <vector>
 
+/**
+ * @class Parser
+ * @brief a class to parse tokens into an AST
+ *
+ */
 class Parser {
 private:
+  /**
+   * @brief lexer for parser to get tokens
+   */
   Lexer lexer;
+  /**
+   * @brief current token being processed and output
+   */
   Token current;
+  /**
+   * @brief the last line number of a non-terminal being processed
+   */
   int lastVnline = 0;
+  /**
+   * @brief to the next token
+   */
   void advance();
+  /**
+   * @brief a function to check whether the next token is in the expected set
+   *
+   * @param types expected token types
+   * @param errorType if not matched, report this error type
+   * @return if matched, return true and advance to the next token; else report
+   * the error and return false
+   */
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);
+  /**
+   * @brief a function to synchronize the parser when an error occurs
+   *
+   * @param types when the next token is in this set, the parser recovers
+   */
   void sync(const std::vector<TokenType> &types);
-  void syncIfCond();
   inline static int silentDepth = 0;
 
 public:
+  /**
+   * @brief a function to report an error
+   *
+   * @param line report line number
+   * @param errorType report error type
+   */
   void error(const int &line, const std::string errorType);
+  /**
+   * @brief a constructor of Parser
+   *
+   * @param lexer lexer to get stream of tokens
+   * @param current the first token from lexer
+   */
   explicit Parser(Lexer &&lexer, Token current);
+  /**
+   * @brief a function to control whether to output the parse tree
+   *
+   * @param silent whether to silent the output
+   */
   void silentPV(bool silent);
+  /**
+   * @brief output the current non-terminal being processed
+   *
+   * @param type the output non-terminal
+   */
   void output(const std::string &type);
   // 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
   std::unique_ptr<CompUnit> parseCompUnit();
