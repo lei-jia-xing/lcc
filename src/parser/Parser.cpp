@@ -204,7 +204,6 @@ std::unique_ptr<VarDef> Parser::parseVarDef() {
     advance(); // eat lbrack
     varDef->arraySize = parseConstExp();
     expect({TokenType::RBRACK}, "k");
-    varDef->initVal = nullptr;
     if (lexer.peekToken(1).type == TokenType::ASSIGN) {
       advance(); // eat rbrack
       advance(); // eat assign
@@ -445,19 +444,16 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
     // error();
   }
   advance(); // eat lparent
-  forStmt->initStmt = nullptr;
   if (current.type != TokenType::SEMICN) {
     forStmt->initStmt = parseForAssignStmt();
     advance();
   }
   advance(); // eat semicn
-  forStmt->cond = nullptr;
   if (current.type != TokenType::SEMICN) {
     forStmt->cond = parseCond();
     advance();
   }
   advance(); // eat semicn
-  forStmt->updateStmt = nullptr;
   if (current.type != TokenType::RPARENT) {
     forStmt->updateStmt = parseForAssignStmt();
     advance();
@@ -497,7 +493,6 @@ std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
     // error();
   }
   advance();
-  returnStmt->exp = nullptr;
   if (current.type != TokenType::SEMICN) {
     returnStmt->exp = parseExp();
     expect({TokenType::SEMICN}, "i");
@@ -666,7 +661,6 @@ std::unique_ptr<LVal> Parser::parseLVal() {
   lVal->line = current.line;
   lastVnline = current.line;
   lVal->ident = current.lexeme;
-  lVal->arrayIndex = nullptr;
   if (lexer.peekToken(1).type == TokenType::LBRACK) {
     advance(); // eat ident
     advance(); // eat lbrack
