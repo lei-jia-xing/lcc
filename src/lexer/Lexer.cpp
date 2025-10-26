@@ -77,9 +77,9 @@ Token Lexer::nextToken() {
     }
     pos = index;
     if (reserveWords.find(word) != reserveWords.end()) {
-      auto token = Token(reserveWords[word], word, line);
+      Token token(reserveWords[word], word, line);
       output(token.getTokenType(), word);
-      return Token(reserveWords[word], word, line);
+      return token;
     } else {
       output("IDENFR", word);
       return Token(TokenType::IDENFR, word, line, word);
@@ -233,7 +233,7 @@ Token Lexer::nextToken() {
     index = pos + 1;
     std::string strcon;
     strcon.push_back('"');
-    while (source[index] != '"' && index < source.length()) {
+    while (index < source.length() && source[index] != '"') {
       strcon.push_back(source[index]);
       index++;
     }
