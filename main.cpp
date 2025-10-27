@@ -29,7 +29,9 @@ int main() {
   Lexer lexer(fileContent);
   auto firstToken = lexer.nextToken();
   Parser parser(std::move(lexer), firstToken);
+  parser.silentPV(false);
   auto compUnit = parser.parseCompUnit();
+  parser.silentPV(true);
 
   // 恢复原始输出流
   std::cerr.rdbuf(original_cerr);
