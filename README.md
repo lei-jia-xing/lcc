@@ -9,7 +9,7 @@ This project is currently under development. The progress of each major componen
 - **Frontend**
   - [x] Lexical Analysis (Lexer)
   - [x] Parsing (Parser)
-  - [ ] Abstract Syntax Tree (AST) Generation
+  - [x] Abstract Syntax Tree (AST) Generation
   - [ ] Semantic Analysis
   - [ ] Intermediate Representation (IR) Generation
 - **Backend**
@@ -68,4 +68,3 @@ To compile a source file, run:
 ## License
 
 This project is licensed under the terms of the [LICENSE](LICENSE) file.
-
