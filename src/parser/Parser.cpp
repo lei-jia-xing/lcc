@@ -59,7 +59,9 @@ void Parser::sync(const std::vector<TokenType> &types) {
 }
 
 void Parser::error(const int &line, const std::string errorType) {
-  std::cerr << line << " " << errorType << std::endl;
+  if (silentDepth == 0) {
+    std::cerr << line << " " << errorType << std::endl;
+  }
 }
 std::unique_ptr<CompUnit> Parser::parseCompUnit() {
   auto compUnit = std::make_unique<CompUnit>();
@@ -422,9 +424,6 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
 
   if (lexer.peekToken(1).type == TokenType::ELSETK) {
     advance();
-    advance(); // eat else
-    ifStmt->elseStmt = parseStmt();
-  } else if (current.type == TokenType::ELSETK) {
     advance(); // eat else
     ifStmt->elseStmt = parseStmt();
   }
