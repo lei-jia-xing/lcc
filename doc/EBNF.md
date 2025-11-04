@@ -2,35 +2,35 @@
 
 - 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
 - 声明 Decl → ConstDecl | VarDecl
-- 常量声明 ConstDecl → 'const' BType ConstDef { ',' ConstDef } ';' // i
+- 常量声明 ConstDecl → 'const' BType ConstDef { ',' ConstDef } ';'
 - 基本类型 BType → 'int'
-- 常量定义 ConstDef → Ident [ '[' ConstExp ']' ] '=' ConstInitVal // k
+- 常量定义 ConstDef → Ident [ '[' ConstExp ']' ] '=' ConstInitVal // b
 - 常量初值 ConstInitVal → ConstExp | '{' [ ConstExp { ',' ConstExp } ] '}'
-- 变量声明 VarDecl → [ 'static' ] BType VarDef { ',' VarDef } ';' // i
-- 变量定义 VarDef → Ident [ '[' ConstExp ']' ] | Ident [ '[' ConstExp ']' ] '=' InitVal // k
+- 变量声明 VarDecl → [ 'static' ] BType VarDef { ',' VarDef } ';'
+- 变量定义 VarDef → Ident [ '[' ConstExp ']' ] | Ident [ '[' ConstExp ']' ] '=' InitVal // b
 - 变量初值 InitVal → Exp | '{' [ Exp { ',' Exp } ] '}'
-- 函数定义 FuncDef → FuncType Ident '(' [FuncFParams] ')' Block // j
-- 主函数定义 MainFuncDef → 'int' 'main' '(' ')' Block // j
+- 函数定义 FuncDef → FuncType Ident '(' [FuncFParams] ')' Block // b g
+- 主函数定义 MainFuncDef → 'int' 'main' '(' ')' Block // g
 - 函数类型 FuncType → 'void' | 'int'
 - 函数形参表 FuncFParams → FuncFParam { ',' FuncFParam }
-- 函数形参 FuncFParam → BType Ident ['[' ']'] // k
+- 函数形参 FuncFParam → BType Ident ['[' ']'] // b
 - 语句块 Block → '{' { BlockItem } '}'
 - 语句块项 BlockItem → Decl | Stmt
-- 语句 Stmt → LVal '=' Exp ';' // i
-  - | [Exp] ';' // i
+- 语句 Stmt → LVal '=' Exp ';' // h
+  - | [Exp] ';'
   - | Block
-  - | 'if' '(' Cond ')' Stmt [ 'else' Stmt ] // j
-  - | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt
-  - | 'break' ';' | 'continue' ';' // i
-  - | 'return' [Exp] ';' // i
-  - | 'printf''('StringConst {','Exp}')'';' // i j
-- 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp }
+  - | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
+  - | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt // h
+  - | 'break' ';' | 'continue' ';' // m
+  - | 'return' [Exp] ';' // f
+  - | 'printf''('StringConst {','Exp}')'';' // l
+- 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp } // h
 - 表达式 Exp → AddExp
 - 条件表达式 Cond → LOrExp
-- 左值表达式 LVal → Ident ['[' Exp ']'] // k
-- 基本表达式 PrimaryExp → '(' Exp ')' | LVal | Number // j
+- 左值表达式 LVal → Ident ['[' Exp ']'] // c
+- 基本表达式 PrimaryExp → '(' Exp ')' | LVal | Number
 - 数值 Number → IntConst
-- 一元表达式 UnaryExp → PrimaryExp | Ident '(' [FuncRParams] ')' | UnaryOp UnaryExp // j
+- 一元表达式 UnaryExp → PrimaryExp | Ident '(' [FuncRParams] ')' | UnaryOp UnaryExp // c d e
 - 单目运算符 UnaryOp → '+' | '−' | '!' 注：'!'仅出现在条件表达式中
 - 函数实参表 FuncRParams → Exp { ',' Exp }
 - 乘除模表达式 MulExp → UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
