@@ -22,7 +22,11 @@ public:
   int array_size = 0;
 
   TypePtr return_type;
-  std::vector<TypePtr> param_types;
+  struct FuncParam {
+    std::string name;
+    TypePtr type;
+  };
+  std::vector<FuncParam> params;
 
   Type(Category cat) : category(cat) {}
 
@@ -43,12 +47,13 @@ public:
   }
 
   static TypePtr create_function_type(TypePtr ret_type,
-                                      const std::vector<TypePtr> &params) {
+                                      const std::vector<FuncParam> &params) {
     auto type = std::make_shared<Type>(Category::Function);
     type->return_type = ret_type;
-    type->param_types = params;
+    type->params = params;
     return type;
   }
+  static TypePtr getIntType() { return create_base_type(BaseType::INT); }
 };
 
 inline std::string to_string(const TypePtr &type) {

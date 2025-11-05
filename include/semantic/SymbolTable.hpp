@@ -24,10 +24,6 @@ public:
     }
   }
 
-  void printCurrentScopeLevel(std::ostream &os) const {
-    os << "Current Scope Level: " << scopes.size() << std::endl;
-  }
-
   bool addSymbol(const Symbol &symbol) {
     if (scopes.empty()) {
       return false;
