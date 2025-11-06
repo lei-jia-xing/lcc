@@ -1,6 +1,7 @@
 #pragma once
 #include <lexer/Token.hpp>
 #include <memory>
+#include <semantic/Type.hpp>
 #include <string>
 #include <vector>
 
@@ -102,7 +103,7 @@ public:
  */
 class BType : public ASTNode {
 public:
-  std::string type;
+  TypePtr type;
 };
 
 /**
@@ -184,7 +185,7 @@ public:
  */
 class FuncType : public ASTNode {
 public:
-  std::string type;
+  TypePtr type;
 };
 
 /**
@@ -217,7 +218,7 @@ public:
 class Block : public ASTNode {
 public:
   std::vector<std::unique_ptr<BlockItem>> items;
-  int closingBraceLine = 0;  // 记录结束大括号'}'的行号
+  int closingBraceLine = 0; // 记录结束大括号'}'的行号
 };
 
 /**

@@ -139,7 +139,7 @@ std::unique_ptr<BType> Parser::parseBType() {
   bType->line = current.line;
   lastVnline = current.line;
   if (current.type == TokenType::INTTK) {
-    bType->type = "int";
+    bType->type = Type::getIntType();
   } else {
     // error();
   }
@@ -308,10 +308,10 @@ std::unique_ptr<FuncType> Parser::parseFuncType() {
   funcType->line = current.line;
   lastVnline = current.line;
   if (current.type == TokenType::VOIDTK) {
-    funcType->type = "void";
+    funcType->type = Type::getVoidType();
     funcType->line = current.line;
   } else if (current.type == TokenType::INTTK) {
-    funcType->type = "int";
+    funcType->type = Type::getIntType();
     funcType->line = current.line;
   } else {
     // error();

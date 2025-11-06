@@ -54,6 +54,7 @@ public:
     return type;
   }
   static TypePtr getIntType() { return create_base_type(BaseType::INT); }
+  static TypePtr getVoidType() { return create_base_type(BaseType::VOID); }
 };
 
 inline std::string to_string(const TypePtr &type) {
