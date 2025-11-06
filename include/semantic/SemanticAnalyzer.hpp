@@ -4,6 +4,7 @@
 #include "semantic/SymbolTable.hpp"
 #include "semantic/Type.hpp"
 #include <iostream>
+#include <optional>
 #include <vector>
 
 class SemanticAnalyzer {
@@ -12,25 +13,12 @@ public:
 
   void visit(CompUnit *node);
 
-  // 函数调用点信息结构
-  struct CallPoint {
-    int line;                    // 调用发生的行号
-    std::string function_name;   // 被调用函数名
-    Symbol* function_symbol;     // 函数符号指针
-    UnaryExp* call_node;         // AST调用节点指针
-
-    CallPoint(int l, const std::string& name, Symbol* sym, UnaryExp* node)
-        : line(l), function_name(name), function_symbol(sym), call_node(node) {}
-  };
-
-  // 获取所有函数调用点信息
-  const std::vector<CallPoint>& getCallPoints() const { return call_points; }
-
 private:
   SymbolTable symbolTable;
   std::ostream &errorStream;
   bool in_loop = false;
-  std::vector<CallPoint> call_points;  // 函数调用点信息列表
+  bool has_return = false;
+  TypePtr current_function_return_type = nullptr;
 
   void error(const int &line, const std::string errorType);
 
@@ -64,7 +52,7 @@ private:
   void visit(InitVal *node);
   void visit(Exp *node);
   void visit(Cond *node);
-  Symbol *visit(LVal *node); // 帮助上层节点找到符号表中的符号
+  std::optional<Symbol> visit(LVal *node); // 帮助上层节点找到符号表中的符号
   void visit(PrimaryExp *node);
   void visit(Number *node);
   void visit(UnaryExp *node);
@@ -77,4 +65,9 @@ private:
   void visit(LAndExp *node);
   void visit(LOrExp *node);
   void visit(ConstExp *node);
+
+private:
+  TypePtr getExpressionType(Exp *exp);
+
+  TypePtr getLValType(const std::string &ident);
 };

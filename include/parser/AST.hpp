@@ -217,6 +217,7 @@ public:
 class Block : public ASTNode {
 public:
   std::vector<std::unique_ptr<BlockItem>> items;
+  int closingBraceLine = 0;  // 记录结束大括号'}'的行号
 };
 
 /**
