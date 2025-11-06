@@ -4,8 +4,10 @@
 #include <semantic/SymbolTable.hpp>
 #include <semantic/Type.hpp>
 
+SemanticAnalyzer::SemanticAnalyzer() {}
+
 void SemanticAnalyzer::error(const int &line, const std::string errorType) {
-  errorStream << line << " " << errorType << std::endl;
+  std::cerr << line << " " << errorType << std::endl;
 }
 
 void SemanticAnalyzer::visit(CompUnit *node) {
@@ -18,6 +20,7 @@ void SemanticAnalyzer::visit(CompUnit *node) {
     visit(funcDef.get());
   }
   visit(node->mainFuncDef.get());
+  symbolTable.printTable();
 }
 void SemanticAnalyzer::visit(Decl *node) {
   if (node == nullptr)
@@ -124,18 +127,65 @@ void SemanticAnalyzer::visit(FuncDef *node) {
 
   auto returnType = visit(node->funcType.get());
 
-  symbolTable.pushScope();
   std::vector<Type::FuncParam> params = visit(node->params.get());
 
   auto funcType = Type::create_function_type(returnType, params);
 
   if (!symbolTable.addSymbol(Symbol(node->ident, funcType, node->line))) {
     error(node->line, "b");
-    return;
+  }
+
+  symbolTable.pushScope();
+
+  has_return = false;
+  current_function_return_type = returnType;
+  bool needs_return = (returnType->base_type == BaseType::INT);
+  for (auto param : params) {
+    if (!symbolTable.addSymbol(Symbol(param.name, param.type, node->line))) {
+      error(node->line, "b");
+    }
   }
   visit(node->block.get());
+
+  if (needs_return && !has_return) {
+    // Use the closing brace line number for error reporting
+    int errorLine = (node->block->closingBraceLine > 0)
+                        ? node->block->closingBraceLine
+                        : node->line;
+    error(errorLine, "g");
+  }
+
+  current_function_return_type = nullptr;
   symbolTable.popScope();
 }
+
+void SemanticAnalyzer::visit(MainFuncDef *node) {
+  if (node == nullptr)
+    return;
+
+  // Main function returns int, so it needs a return statement
+  symbolTable.pushScope();
+
+  has_return = false;
+  current_function_return_type =
+      Type::getIntType(); // main function returns int
+  bool needs_return = true;
+
+  visit(node->block.get());
+
+  // Check if main function is missing return statement
+  if (needs_return && !has_return) {
+    // Use the closing brace line number for error reporting
+    int errorLine = (node->block->closingBraceLine > 0)
+                        ? node->block->closingBraceLine
+                        : node->line;
+    error(errorLine, "g");
+  }
+
+  current_function_return_type = nullptr;
+  symbolTable.popScope();
+}
+
 void SemanticAnalyzer::visit(Block *node) {
   if (node == nullptr)
     return;
@@ -181,9 +231,9 @@ void SemanticAnalyzer::visit(Stmt *node) {
 void SemanticAnalyzer::visit(AssignStmt *node) {
   if (node == nullptr)
     return;
-  Symbol symbol = *visit(node->lval.get());
+  auto symbolOpt = visit(node->lval.get());
   visit(node->exp.get());
-  if (symbol.type->is_const) {
+  if (symbolOpt.has_value() && symbolOpt->type->is_const) {
     error(node->line, "h");
   }
 }
@@ -231,26 +281,59 @@ void SemanticAnalyzer::visit(ContinueStmt *node) {
 void SemanticAnalyzer::visit(ReturnStmt *node) {
   if (node == nullptr)
     return;
+
+  has_return = true;
+
+  // Check return type mismatch (error type f)
+  if (current_function_return_type) {
+    if (node->exp) {
+      TypePtr exprType = getExpressionType(node->exp.get());
+      // If function expects void but has return value
+      if (current_function_return_type->base_type == BaseType::VOID &&
+          exprType) {
+        error(node->line, "f");
+      }
+    } else {
+      // If function expects int but no return value
+      if (current_function_return_type->base_type == BaseType::INT) {
+        error(node->line, "f");
+      }
+    }
+  }
+
   visit(node->exp.get());
-  // TODO:
-  // function call check return type, error type f
 }
 void SemanticAnalyzer::visit(PrintfStmt *node) {
   if (node == nullptr)
     return;
+
+  // Count format specifiers in the format string
+  int formatCount = 0;
+  for (size_t i = 0; i < node->formatString.length(); ++i) {
+    if (node->formatString[i] == '%' && i + 1 < node->formatString.length() &&
+        node->formatString[i + 1] == 'd') {
+      formatCount++;
+      i++; // Skip the 'd'
+    }
+  }
+
+  int argCount = node->args.size();
+
+  if (formatCount != argCount) {
+    error(node->line, "l");
+  }
+
   for (auto &exp : node->args) {
     visit(exp.get());
   }
-  // TODO:
-  //  check format string args match, error type l
 }
 
 void SemanticAnalyzer::visit(ForAssignStmt *node) {
   if (node == nullptr)
     return;
   for (auto &assignment : node->assignments) {
-    Symbol symbol = *visit(assignment.lval.get());
-    if (symbol.type->is_const) {
+    auto symbolOpt = visit(assignment.lval.get());
+    if (symbolOpt.has_value() && symbolOpt->type->is_const) {
       error(node->line, "h");
     }
     visit(assignment.exp.get());
@@ -300,10 +383,23 @@ void SemanticAnalyzer::visit(Cond *node) {
     return;
   visit(node->lOrExp.get());
 }
-Symbol *SemanticAnalyzer::visit(LVal *node) {
+std::optional<Symbol> SemanticAnalyzer::visit(LVal *node) {
   if (node == nullptr)
-    return nullptr;
-  // check symboltable, if nnt fount, error type c
+    return std::nullopt;
+
+  // Check symbol table, if not found, error type c (undefined name)
+  auto symbolOpt = symbolTable.findSymbol(node->ident);
+  if (!symbolOpt.has_value()) {
+    error(node->line, "c");
+    return std::nullopt;
+  }
+
+  // Visit array index if present
+  if (node->arrayIndex) {
+    visit(node->arrayIndex.get());
+  }
+
+  return symbolOpt;
 }
 void SemanticAnalyzer::visit(PrimaryExp *node) {
   if (node == nullptr)
@@ -329,6 +425,22 @@ void SemanticAnalyzer::visit(UnaryExp *node) {
     visit(node->unaryOp.get());
     visit(node->unaryExp.get());
   } else if (node->unaryType == UnaryExp::UnaryType::FUNC_CALL) {
+    auto funcSymbolOpt = symbolTable.findSymbol(node->funcIdent);
+    if (!funcSymbolOpt.has_value()) {
+      error(node->line, "c");
+      return;
+    }
+    if (funcSymbolOpt.value().type->params.size() !=
+        node->funcRParams->exps.size()) {
+      error(node->line, "d");
+      return;
+    }
+    for (auto param : funcSymbolOpt.value().type->params) {
+      if (param.type != getLValType(param.name)) {
+        error(node->line, "e");
+        return;
+      }
+    }
     visit(node->funcRParams.get());
   }
   return;
@@ -384,4 +496,22 @@ void SemanticAnalyzer::visit(ConstExp *node) {
   if (node == nullptr)
     return;
   visit(node->addExp.get());
+}
+
+TypePtr SemanticAnalyzer::getExpressionType(Exp *exp) {
+  if (exp == nullptr)
+    return nullptr;
+
+  // For now, assume all expressions return int type
+  // This is a simplified implementation
+  return Type::getIntType();
+}
+
+// Helper method to get LVal type (can be array or int)
+TypePtr SemanticAnalyzer::getLValType(const std::string &ident) {
+  auto symbolOpt = symbolTable.findSymbol(ident);
+  if (!symbolOpt.has_value()) {
+    return nullptr;
+  }
+  return symbolOpt.value().type;
 }

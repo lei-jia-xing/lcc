@@ -5,13 +5,11 @@
 #include <iostream>
 
 int main() {
-  // 重定向错误输出到error.txt
   std::ofstream errorfile("error.txt");
   std::streambuf *original_cerr = std::cerr.rdbuf();
   std::cerr.rdbuf(errorfile.rdbuf());
 
-  // 重定向标准输出到parser.txt
-  std::ofstream parserfile("parser.txt");
+  std::ofstream parserfile("symbol.txt");
   std::streambuf *original_cout = std::cout.rdbuf();
   std::cout.rdbuf(parserfile.rdbuf());
 
@@ -32,7 +30,7 @@ int main() {
   Parser parser(std::move(lexer), firstToken);
   auto compUnit = parser.parseCompUnit();
 
-  SemanticAnalyzer semanticAnalyzer(std::cerr);
+  SemanticAnalyzer semanticAnalyzer;
   if (compUnit) {
     semanticAnalyzer.visit(compUnit.get());
   }

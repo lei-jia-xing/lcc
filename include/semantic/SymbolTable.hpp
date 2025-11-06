@@ -31,7 +31,7 @@ public:
     if (scopes.back().count(symbol.name)) {
       return false;
     }
-    scopes.back()[symbol.name] = symbol;
+    scopes.back().emplace(symbol.name, symbol);
     return true;
   }
 
@@ -45,7 +45,7 @@ public:
     return std::nullopt;
   }
 
-  void printTable(std::ostream &os) const {
+  void printTable() const {
     std::unordered_set<std::string> printed_symbols;
     for (int i = scopes.size() - 1; i >= 0; --i) {
       const auto &scope = scopes[i];
@@ -53,8 +53,8 @@ public:
       for (const auto &pair : scope) {
         const auto &symbol = pair.second;
         if (printed_symbols.find(symbol.name) == printed_symbols.end()) {
-          os << scope_level << " " << symbol.name << " "
-             << to_string(symbol.type) << std::endl;
+          std::cout << scope_level << " " << symbol.name << " "
+                    << to_string(symbol.type) << std::endl;
           printed_symbols.insert(symbol.name);
         }
       }

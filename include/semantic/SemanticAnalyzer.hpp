@@ -1,21 +1,16 @@
 #pragma once
 #include "parser/AST.hpp"
-#include "semantic/Symbol.hpp"
 #include "semantic/SymbolTable.hpp"
 #include "semantic/Type.hpp"
-#include <iostream>
-#include <optional>
-#include <vector>
 
 class SemanticAnalyzer {
 public:
-  SemanticAnalyzer(std::ostream &errorStream) : errorStream(errorStream) {}
+  SemanticAnalyzer();
 
   void visit(CompUnit *node);
 
 private:
   SymbolTable symbolTable;
-  std::ostream &errorStream;
   bool in_loop = false;
   bool has_return = false;
   TypePtr current_function_return_type = nullptr;
@@ -29,8 +24,8 @@ private:
   void visit(VarDef *node, TypePtr type);
   void visit(FuncDef *node);
   void visit(MainFuncDef *node);
-  std::vector<Type::FuncParam> visit(FuncFParams *node);
-  Type::FuncParam visit(FuncFParam *node); // 帮助上层节点确定参数类型
+  void visit(FuncFParams *node);
+  void visit(FuncFParam *node);
   void visit(Block *node);
   void visit(BlockItem *node);
 
@@ -46,13 +41,13 @@ private:
   void visit(PrintfStmt *node);
   void visit(ForAssignStmt *node);
 
-  TypePtr visit(BType *node);    // 帮助上层节点确定Type
-  TypePtr visit(FuncType *node); // 帮助上层节点确定functype
+  void visit(BType *node);
+  void visit(FuncType *node);
   void visit(ConstInitVal *node);
   void visit(InitVal *node);
   void visit(Exp *node);
   void visit(Cond *node);
-  std::optional<Symbol> visit(LVal *node); // 帮助上层节点找到符号表中的符号
+  void visit(LVal *node);
   void visit(PrimaryExp *node);
   void visit(Number *node);
   void visit(UnaryExp *node);
