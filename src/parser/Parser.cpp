@@ -1,6 +1,7 @@
 #include "parser/Parser.hpp"
 #include "lexer/Token.hpp"
 #include "parser/AST.hpp"
+#include "errorReporter/ErrorReporter.hpp"
 #include <iostream>
 #include <memory>
 
@@ -41,7 +42,7 @@ bool Parser::expect(const std::vector<TokenType> &types,
 
 void Parser::error(const int &line, const std::string errorType) {
   if (silentDepth == 0) {
-    std::cerr << line << " " << errorType << std::endl;
+    ErrorReporter::getInstance().addError(line, errorType);
   }
 }
 std::unique_ptr<CompUnit> Parser::parseCompUnit() {
@@ -139,7 +140,7 @@ std::unique_ptr<BType> Parser::parseBType() {
   bType->line = current.line;
   lastVnline = current.line;
   if (current.type == TokenType::INTTK) {
-    bType->type = Type::getIntType();
+    bType->type = "int";
   } else {
     // error();
   }
@@ -308,10 +309,10 @@ std::unique_ptr<FuncType> Parser::parseFuncType() {
   funcType->line = current.line;
   lastVnline = current.line;
   if (current.type == TokenType::VOIDTK) {
-    funcType->type = Type::getVoidType();
+    funcType->type = "void";
     funcType->line = current.line;
   } else if (current.type == TokenType::INTTK) {
-    funcType->type = Type::getIntType();
+    funcType->type = "int";
     funcType->line = current.line;
   } else {
     // error();
