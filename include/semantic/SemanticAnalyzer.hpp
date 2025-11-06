@@ -2,6 +2,7 @@
 #include "parser/AST.hpp"
 #include "semantic/SymbolTable.hpp"
 #include "semantic/Type.hpp"
+#include <memory>
 
 class SemanticAnalyzer {
 public:
@@ -10,8 +11,8 @@ public:
   void visit(CompUnit *node);
 
 private:
-  SymbolTable symbolTable;
-  bool in_loop = false;
+  std::shared_ptr<SymbolTable> symbolTable;
+  int loop = 0;
   bool has_return = false;
   TypePtr current_function_return_type = nullptr;
 
@@ -41,28 +42,23 @@ private:
   void visit(PrintfStmt *node);
   void visit(ForAssignStmt *node);
 
-  void visit(BType *node);
-  void visit(FuncType *node);
+  TypePtr visit(BType *node);
+  TypePtr visit(FuncType *node);
   void visit(ConstInitVal *node);
   void visit(InitVal *node);
-  void visit(Exp *node);
-  void visit(Cond *node);
-  void visit(LVal *node);
-  void visit(PrimaryExp *node);
-  void visit(Number *node);
-  void visit(UnaryExp *node);
+  TypePtr visit(Exp *node);
+  TypePtr visit(Cond *node);
+  TypePtr visit(LVal *node);
+  TypePtr visit(PrimaryExp *node);
+  TypePtr visit(Number *node);
+  TypePtr visit(UnaryExp *node);
   void visit(UnaryOp *node);
-  void visit(FuncRParams *node);
-  void visit(MulExp *node);
-  void visit(AddExp *node);
-  void visit(RelExp *node);
-  void visit(EqExp *node);
-  void visit(LAndExp *node);
-  void visit(LOrExp *node);
-  void visit(ConstExp *node);
-
-private:
-  TypePtr getExpressionType(Exp *exp);
-
-  TypePtr getLValType(const std::string &ident);
+  std::vector<TypePtr> visit(FuncRParams *node);
+  TypePtr visit(MulExp *node);
+  TypePtr visit(AddExp *node);
+  TypePtr visit(RelExp *node);
+  TypePtr visit(EqExp *node);
+  TypePtr visit(LAndExp *node);
+  TypePtr visit(LOrExp *node);
+  TypePtr visit(ConstExp *node);
 };

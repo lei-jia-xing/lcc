@@ -103,7 +103,7 @@ public:
  */
 class BType : public ASTNode {
 public:
-  TypePtr type;
+  std::string type;
 };
 
 /**
@@ -185,7 +185,7 @@ public:
  */
 class FuncType : public ASTNode {
 public:
-  TypePtr type;
+  std::string type;
 };
 
 /**
@@ -196,6 +196,7 @@ public:
 class FuncFParams : public ASTNode {
 public:
   std::vector<std::unique_ptr<FuncFParam>> params;
+  std::vector<TypePtr> types;
 };
 
 /**
@@ -208,6 +209,7 @@ public:
   std::unique_ptr<BType> bType;
   std::string ident;
   bool isArray = false;
+  TypePtr type;
 };
 
 /**
@@ -380,6 +382,7 @@ public:
 class Exp : public ASTNode {
 public:
   std::unique_ptr<AddExp> addExp;
+  TypePtr type;
 };
 
 /**
@@ -390,6 +393,7 @@ public:
 class Cond : public ASTNode {
 public:
   std::unique_ptr<LOrExp> lOrExp;
+  TypePtr type;
 };
 
 /**
@@ -401,6 +405,7 @@ class LVal : public ASTNode {
 public:
   std::string ident;
   std::unique_ptr<Exp> arrayIndex;
+  TypePtr type;
 };
 
 /**
@@ -415,6 +420,7 @@ public:
   std::unique_ptr<Exp> exp;
   std::unique_ptr<LVal> lval;
   std::unique_ptr<Number> number;
+  TypePtr type;
 };
 
 /**
@@ -425,6 +431,7 @@ public:
 class Number : public ASTNode {
 public:
   int value;
+  TypePtr type;
 };
 
 /**
@@ -453,6 +460,7 @@ public:
   std::unique_ptr<FuncRParams> funcRParams;
   std::unique_ptr<UnaryOp> unaryOp;
   std::unique_ptr<UnaryExp> unaryExp;
+  TypePtr type;
 };
 
 /**
@@ -463,6 +471,7 @@ public:
 class FuncRParams : public ASTNode {
 public:
   std::vector<std::unique_ptr<Exp>> exps;
+  std::vector<TypePtr> types;
 };
 
 /**
@@ -476,6 +485,7 @@ public:
   std::unique_ptr<MulExp> left;
   OpType op = OpType::NONE;
   std::unique_ptr<UnaryExp> unaryExp;
+  TypePtr type;
 };
 
 /**
@@ -489,6 +499,7 @@ public:
   std::unique_ptr<AddExp> left;
   OpType op = OpType::NONE;
   std::unique_ptr<MulExp> mulExp;
+  TypePtr type;
 };
 
 /**
@@ -502,6 +513,7 @@ public:
   std::unique_ptr<RelExp> left;
   OpType op = OpType::NONE;
   std::unique_ptr<AddExp> addExp;
+  TypePtr type;
 };
 
 /**
@@ -515,6 +527,7 @@ public:
   std::unique_ptr<EqExp> left;
   OpType op = OpType::NONE;
   std::unique_ptr<RelExp> relExp;
+  TypePtr type;
 };
 
 /**
@@ -526,6 +539,7 @@ class LAndExp : public ASTNode {
 public:
   std::unique_ptr<LAndExp> left;
   std::unique_ptr<EqExp> eqExp;
+  TypePtr type;
 };
 
 /**
@@ -537,6 +551,7 @@ class LOrExp : public ASTNode {
 public:
   std::unique_ptr<LOrExp> left;
   std::unique_ptr<LAndExp> lAndExp;
+  TypePtr type;
 };
 
 /**
@@ -547,4 +562,5 @@ public:
 class ConstExp : public ASTNode {
 public:
   std::unique_ptr<AddExp> addExp;
+  TypePtr type;
 };
