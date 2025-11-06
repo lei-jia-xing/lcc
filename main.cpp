@@ -1,3 +1,4 @@
+#include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
 #include "semantic/SemanticAnalyzer.hpp"
@@ -34,6 +35,9 @@ int main() {
   if (compUnit) {
     semanticAnalyzer.visit(compUnit.get());
   }
+
+  // 打印所有错误（按行号排序）
+  ErrorReporter::getInstance().printErrors();
 
   // 恢复原始输出流
   std::cerr.rdbuf(original_cerr);
