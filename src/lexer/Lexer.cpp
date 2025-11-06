@@ -29,7 +29,7 @@ void Lexer::silentPV(bool silent) {
 }
 
 void Lexer::output(const std::string &type, const std::string &value) {
-  if (silentDepth == 0) {
+  if (silentDepth == 0 && outputEnabled) {
     std::cout << type << " " << value << std::endl;
   }
 }

@@ -1,5 +1,6 @@
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
+#include "semantic/SemanticAnalyzer.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -29,9 +30,12 @@ int main() {
   Lexer lexer(fileContent);
   auto firstToken = lexer.nextToken();
   Parser parser(std::move(lexer), firstToken);
-  parser.silentPV(false);
   auto compUnit = parser.parseCompUnit();
-  parser.silentPV(true);
+
+  SemanticAnalyzer semanticAnalyzer(std::cerr);
+  if (compUnit) {
+    semanticAnalyzer.visit(compUnit.get());
+  }
 
   // 恢复原始输出流
   std::cerr.rdbuf(original_cerr);

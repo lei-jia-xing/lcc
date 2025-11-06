@@ -21,6 +21,8 @@ private:
    */
   int line;
 
+  bool outputEnabled = false;
+
   /**
    * @brief reserve keyword in this EBNF
    */

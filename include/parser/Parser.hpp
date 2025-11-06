@@ -29,6 +29,8 @@ private:
    * @brief the last line number of a non-terminal being processed
    */
   int lastVnline = 0;
+
+  bool outputEnabled = false;
   /**
    * @brief to the next token
    */
@@ -43,12 +45,6 @@ private:
    */
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);
-  /**
-   * @brief a function to synchronize the parser when an error occurs
-   *
-   * @param types when the next token is in this set, the parser recovers
-   */
-  void sync(const std::vector<TokenType> &types);
   inline static int silentDepth = 0;
 
 public:

@@ -16,7 +16,7 @@ void Parser::silentPV(bool silent) {
   }
 }
 void Parser::output(const std::string &type) {
-  if (silentDepth == 0) {
+  if (silentDepth == 0 && outputEnabled) {
     std::cout << type << std::endl;
   }
 }
@@ -37,25 +37,6 @@ bool Parser::expect(const std::vector<TokenType> &types,
     advance();
     return true;
   }
-}
-void Parser::sync(const std::vector<TokenType> &types) {
-  silentPV(true);
-
-  while (lexer.peekToken(1).type != TokenType::EOFTK) {
-    bool matched = false;
-    for (auto t : types) {
-      if (lexer.peekToken(1).type == t) {
-        matched = true;
-        break;
-      }
-    }
-    if (matched) {
-      silentPV(false);
-      return;
-    }
-    advance();
-  }
-  silentPV(false);
 }
 
 void Parser::error(const int &line, const std::string errorType) {
@@ -394,6 +375,8 @@ std::unique_ptr<Block> Parser::parseBlock() {
   if (current.type != TokenType::RBRACE) {
     // error();
   }
+  // Record the closing brace line number
+  block->closingBraceLine = current.line;
   output("<Block>");
   return block;
 }
