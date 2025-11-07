@@ -168,10 +168,7 @@ void SemanticAnalyzer::visit(FuncDef *node) {
   if (needs_return) {
     bool ok = endsWithReturn(node->block.get());
     if (!ok) {
-      int errorLine = (node->block->closingBraceLine > 0)
-                          ? node->block->closingBraceLine
-                          : node->line;
-      error(errorLine, "g");
+      error(node->block->closingBraceLine, "g");
     }
   }
 
@@ -193,10 +190,7 @@ void SemanticAnalyzer::visit(MainFuncDef *node) {
   if (needs_return) {
     bool ok = endsWithReturn(node->block.get());
     if (!ok) {
-      int errorLine = (node->block->closingBraceLine > 0)
-                          ? node->block->closingBraceLine
-                          : node->line;
-      error(errorLine, "g");
+      error(node->block->closingBraceLine, "g");
     }
   }
 
@@ -250,8 +244,7 @@ void SemanticAnalyzer::visit(AssignStmt *node) {
     return;
   TypePtr type = visit(node->lval.get());
   visit(node->exp.get());
-  std::optional<Symbol> symbolOpt = symbolTable.findSymbol(node->lval->ident);
-  if (symbolOpt.has_value() && symbolOpt->type->is_const) {
+  if (type && type->is_const) {
     error(node->lval->line, "h");
   }
 }
@@ -335,9 +328,7 @@ void SemanticAnalyzer::visit(ForAssignStmt *node) {
     return;
   for (auto &assignment : node->assignments) {
     TypePtr type = visit(assignment.lval.get());
-    std::optional<Symbol> symbolOpt =
-        symbolTable.findSymbol(assignment.lval->ident);
-    if (symbolOpt.has_value() && symbolOpt->type->is_const) {
+    if (type && type->is_const) {
       error(assignment.lval->line, "h");
     }
   }
@@ -391,12 +382,13 @@ TypePtr SemanticAnalyzer::visit(LVal *node) {
     return nullptr;
 
   auto symbolOpt = symbolTable.findSymbol(node->ident);
-  if (node->arrayIndex) {
-    visit(node->arrayIndex.get());
-  }
   if (!symbolOpt.has_value()) {
     error(node->line, "c");
     return nullptr;
+  }
+  if (node->arrayIndex) {
+    visit(node->arrayIndex.get());
+    return symbolOpt.value().type->array_element_type;
   }
   return symbolOpt.value().type;
 }
@@ -475,6 +467,9 @@ void SemanticAnalyzer::visit(UnaryOp *node) {
 std::vector<TypePtr> SemanticAnalyzer::visit(FuncRParams *node) {
   if (node == nullptr)
     return {};
+  // Prevent accumulation when node visited multiple times (avoids duplicate 'e'
+  // and potential OOB)
+  node->types.clear();
   for (auto &exp : node->exps) {
     node->types.push_back(visit(exp.get()));
   }
