@@ -1,4 +1,5 @@
 #include "lexer/Lexer.hpp"
+#include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Token.hpp"
 #include <iostream>
 #include <string>
@@ -16,7 +17,7 @@ void Lexer::skipwhitespace() {
 }
 void Lexer::error(const int &line, const std::string errorType) {
   if (silentDepth == 0) {
-    std::cerr << line << " " << errorType << std::endl;
+    ErrorReporter::getInstance().addError(line, errorType);
   }
 }
 

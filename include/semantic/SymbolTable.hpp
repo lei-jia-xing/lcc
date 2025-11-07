@@ -1,76 +1,67 @@
 #pragma once
 #include "semantic/Symbol.hpp"
 #include <iostream>
-#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-// Minimal shared_ptr-based scope node with father link and insertion order
-struct ScopeNode {
-  int id = 0; // 1-based scope id
-  std::weak_ptr<ScopeNode> father;
-  std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols; // name -> symbol
-  std::vector<std::shared_ptr<Symbol>> order;                        // declaration order
-};
-
 class SymbolTable {
 private:
-  std::shared_ptr<ScopeNode> cur_scope;                         // current active scope
-  std::vector<std::shared_ptr<ScopeNode>> registry;             // all scopes by creation order
-  int nextId = 1;                                               // next id to assign
+  struct ScopeRecord {
+    int id = 0;
+    std::unordered_map<std::string, Symbol> table;
+    std::vector<std::string> order;
+  };
+
+  std::vector<ScopeRecord> records;
+  std::vector<size_t> active;
+  int nextId = 1;
 
 public:
   SymbolTable() { pushScope(); }
 
-  // Enter a new scope; set father to previous cur_scope
   void pushScope() {
-    auto node = std::make_shared<ScopeNode>();
-    node->id = nextId++;
-    node->father = cur_scope; // empty for the first (global) scope
-    registry.push_back(node);
-    cur_scope = node;
+    ScopeRecord rec;
+    rec.id = nextId++;
+    records.emplace_back(std::move(rec));
+    active.push_back(records.size() - 1);
   }
 
-  // Leave current scope; move cur_scope to father
   void popScope() {
-    if (cur_scope) {
-      cur_scope = cur_scope->father.lock();
+    if (!active.empty()) {
+      active.pop_back();
     }
   }
 
-  // Add symbol to current scope; reject duplicate names within the same scope
   bool addSymbol(const Symbol &symbol) {
-    if (!cur_scope)
+    if (active.empty())
       return false;
-    if (cur_scope->symbols.count(symbol.name))
+    auto &rec = records[active.back()];
+    if (rec.table.count(symbol.name))
       return false;
-    auto symPtr = std::make_shared<Symbol>(symbol);
-    cur_scope->symbols.emplace(symbol.name, symPtr);
-    cur_scope->order.push_back(symPtr);
+    rec.table.emplace(symbol.name, symbol);
+    rec.order.push_back(symbol.name);
     return true;
   }
 
-  // Lookup by walking father chain from cur_scope outward
   std::optional<Symbol> findSymbol(const std::string &name) const {
-    auto node = cur_scope;
-    while (node) {
-      auto it = node->symbols.find(name);
-      if (it != node->symbols.end()) {
-        return *(it->second);
+    for (auto it = active.rbegin(); it != active.rend(); ++it) {
+      const auto &rec = records[*it];
+      auto f = rec.table.find(name);
+      if (f != rec.table.end()) {
+        return f->second;
       }
-      node = node->father.lock();
     }
     return std::nullopt;
   }
 
-  // Print by ascending scope id (creation order), and by declaration order within each scope
   void printTable() const {
-    for (const auto &node : registry) {
-      for (const auto &sym : node->order) {
-        std::cout << node->id << " " << sym->name << " "
-                  << to_string(sym->type) << std::endl;
+    for (const auto &rec : records) {
+      for (const auto &name : rec.order) {
+        const auto &sym = rec.table.at(name);
+        std::cout << rec.id << " " << sym.name << " " << to_string(sym.type)
+                  << std::endl;
       }
     }
   }

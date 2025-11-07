@@ -6,10 +6,19 @@
 #include <semantic/SymbolTable.hpp>
 #include <semantic/Type.hpp>
 
-SemanticAnalyzer::SemanticAnalyzer() { symbolTable = std::make_shared<SymbolTable>(); }
+SemanticAnalyzer::SemanticAnalyzer() {}
 
 void SemanticAnalyzer::error(const int &line, const std::string errorType) {
   ErrorReporter::getInstance().addError(line, errorType);
+}
+
+bool endsWithReturn(Block *block) {
+  if (!block)
+    return false;
+  if (block->items.empty())
+    return false;
+  auto &item = block->items.back();
+  return item->stmt && item->stmt->stmtType == Stmt::StmtType::RETURN;
 }
 
 void SemanticAnalyzer::visit(CompUnit *node) {
@@ -22,7 +31,7 @@ void SemanticAnalyzer::visit(CompUnit *node) {
     visit(funcDef.get());
   }
   visit(node->mainFuncDef.get());
-  symbolTable->printTable();
+  symbolTable.printTable();
 }
 void SemanticAnalyzer::visit(Decl *node) {
   if (node == nullptr)
@@ -68,14 +77,18 @@ TypePtr SemanticAnalyzer::visit(BType *node) {
 void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
   if (node == nullptr)
     return;
+  TypePtr defType;
   if (node->arraySize == nullptr) {
-    type->category = Type::Category::Basic;
+    defType = std::make_shared<Type>(*type);
+    defType->category = Type::Category::Basic;
   } else {
-    type->category = Type::Category::Array;
     visit(node->arraySize.get());
+    TypePtr elem = std::make_shared<Type>(*type);
+    elem->category = Type::Category::Basic;
+    defType = Type::create_array_type(elem, 0);
   }
-  Symbol symbol(node->ident, type, node->line);
-  if (!symbolTable->addSymbol(symbol)) {
+  Symbol symbol(node->ident, defType, node->line);
+  if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
     return;
   }
@@ -84,14 +97,18 @@ void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
 void SemanticAnalyzer::visit(VarDef *node, TypePtr type) {
   if (node == nullptr)
     return;
+  TypePtr defType;
   if (node->arraySize == nullptr) {
-    type->category = Type::Category::Basic;
+    defType = std::make_shared<Type>(*type);
+    defType->category = Type::Category::Basic;
   } else {
-    type->category = Type::Category::Array;
     visit(node->arraySize.get());
+    TypePtr elem = std::make_shared<Type>(*type);
+    elem->category = Type::Category::Basic;
+    defType = Type::create_array_type(elem, 0);
   }
-  Symbol symbol(node->ident, type, node->line);
-  if (!symbolTable->addSymbol(symbol)) {
+  Symbol symbol(node->ident, defType, node->line);
+  if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
   }
 }
@@ -111,11 +128,11 @@ void SemanticAnalyzer::visit(FuncFParam *node) {
 
   TypePtr type = visit(node->bType.get());
   if (node->isArray) {
-    type->category = Type::Category::Array;
+    type = Type::create_array_type(type, -1);
   }
 
   Symbol paramSymbol(node->ident, type, node->line);
-  if (!symbolTable->addSymbol(paramSymbol)) {
+  if (!symbolTable.addSymbol(paramSymbol)) {
     error(node->line, "b");
   }
 }
@@ -130,55 +147,58 @@ void SemanticAnalyzer::visit(FuncDef *node) {
     for (auto &paramNode : node->params->params) {
       TypePtr paramType = visit(paramNode->bType.get());
       if (paramNode->isArray) {
-        paramType->category = Type::Category::Array;
+        paramType = Type::create_array_type(paramType, -1);
       }
       params.push_back(paramType);
     }
   }
   auto funcType = Type::create_function_type(returnType, params);
 
-  if (!symbolTable->addSymbol(Symbol(node->ident, funcType, node->line))) {
+  if (!symbolTable.addSymbol(Symbol(node->ident, funcType, node->line))) {
     error(node->line, "b");
   }
 
-  symbolTable->pushScope();
+  symbolTable.pushScope();
 
-  has_return = false;
   current_function_return_type = returnType;
   bool needs_return = (returnType->base_type == BaseType::INT);
 
   visit(node->params.get());
   visit(node->block.get());
 
-  if (needs_return && !has_return) {
-    // Use the closing brace line number for error reporting
-    int errorLine = (node->block->closingBraceLine > 0)
-                        ? node->block->closingBraceLine
-                        : node->line;
-    error(errorLine, "g");
+  if (needs_return) {
+    bool ok = endsWithReturn(node->block.get());
+    if (!ok) {
+      int errorLine = (node->block->closingBraceLine > 0)
+                          ? node->block->closingBraceLine
+                          : node->line;
+      error(errorLine, "g");
+    }
   }
 
   current_function_return_type = nullptr;
-  symbolTable->popScope();
+  symbolTable.popScope();
 }
 
 void SemanticAnalyzer::visit(MainFuncDef *node) {
   if (node == nullptr)
     return;
 
-  has_return = false;
   current_function_return_type = Type::getIntType();
   bool needs_return = true;
 
-  symbolTable->pushScope();
+  symbolTable.pushScope();
   visit(node->block.get());
-  symbolTable->popScope();
+  symbolTable.popScope();
 
-  if (needs_return && !has_return) {
-    int errorLine = (node->block->closingBraceLine > 0)
-                        ? node->block->closingBraceLine
-                        : node->line;
-    error(errorLine, "g");
+  if (needs_return) {
+    bool ok = endsWithReturn(node->block.get());
+    if (!ok) {
+      int errorLine = (node->block->closingBraceLine > 0)
+                          ? node->block->closingBraceLine
+                          : node->line;
+      error(errorLine, "g");
+    }
   }
 
   current_function_return_type = nullptr;
@@ -209,9 +229,9 @@ void SemanticAnalyzer::visit(Stmt *node) {
   } else if (node->stmtType == Stmt::StmtType::EXP) {
     visit(static_cast<ExpStmt *>(node));
   } else if (node->stmtType == Stmt::StmtType::BLOCK) {
-  symbolTable->pushScope();
+    symbolTable.pushScope();
     visit(static_cast<BlockStmt *>(node));
-  symbolTable->popScope();
+    symbolTable.popScope();
   } else if (node->stmtType == Stmt::StmtType::IF) {
     visit(static_cast<IfStmt *>(node));
   } else if (node->stmtType == Stmt::StmtType::FOR) {
@@ -231,7 +251,7 @@ void SemanticAnalyzer::visit(AssignStmt *node) {
     return;
   TypePtr type = visit(node->lval.get());
   visit(node->exp.get());
-  std::optional<Symbol> symbolOpt = symbolTable->findSymbol(node->lval->ident);
+  std::optional<Symbol> symbolOpt = symbolTable.findSymbol(node->lval->ident);
   if (symbolOpt.has_value() && symbolOpt->type->is_const) {
     error(node->line, "h");
   }
@@ -281,9 +301,6 @@ void SemanticAnalyzer::visit(ReturnStmt *node) {
   if (node == nullptr)
     return;
 
-  has_return = true;
-
-  // Check return type mismatch (error type f)
   if (current_function_return_type) {
     if (node->exp) {
       TypePtr exprType = visit(node->exp.get());
@@ -302,13 +319,12 @@ void SemanticAnalyzer::visit(PrintfStmt *node) {
   if (node == nullptr)
     return;
 
-  // Count format specifiers in the format string
   int formatCount = 0;
   for (size_t i = 0; i < node->formatString.length(); ++i) {
     if (node->formatString[i] == '%' && i + 1 < node->formatString.length() &&
         node->formatString[i + 1] == 'd') {
       formatCount++;
-      i++; // Skip the 'd'
+      i++;
     }
   }
 
@@ -328,8 +344,8 @@ void SemanticAnalyzer::visit(ForAssignStmt *node) {
     return;
   for (auto &assignment : node->assignments) {
     TypePtr type = visit(assignment.lval.get());
-  std::optional<Symbol> symbolOpt =
-    symbolTable->findSymbol(assignment.lval->ident);
+    std::optional<Symbol> symbolOpt =
+        symbolTable.findSymbol(assignment.lval->ident);
     if (symbolOpt.has_value() && symbolOpt->type->is_const) {
       error(node->line, "h");
     }
@@ -383,7 +399,7 @@ TypePtr SemanticAnalyzer::visit(LVal *node) {
   if (node == nullptr)
     return nullptr;
 
-  auto symbolOpt = symbolTable->findSymbol(node->ident);
+  auto symbolOpt = symbolTable.findSymbol(node->ident);
   if (!symbolOpt.has_value()) {
     error(node->line, "c");
     return nullptr;
@@ -403,7 +419,7 @@ TypePtr SemanticAnalyzer::visit(PrimaryExp *node) {
   } else if (node->primaryType == PrimaryExp::PrimaryType::NUMBER) {
     node->type = visit(node->number.get());
   }
-  return nullptr;
+  return node->type;
 }
 TypePtr SemanticAnalyzer::visit(Number *node) {
   if (node == nullptr)
@@ -431,7 +447,7 @@ TypePtr SemanticAnalyzer::visit(UnaryExp *node) {
       return node->type;
     }
 
-  auto funcSymbolOpt = symbolTable->findSymbol(node->funcIdent);
+    auto funcSymbolOpt = symbolTable.findSymbol(node->funcIdent);
     if (!funcSymbolOpt.has_value()) {
       error(node->line, "c");
       node->type = nullptr;
@@ -453,8 +469,7 @@ TypePtr SemanticAnalyzer::visit(UnaryExp *node) {
     for (size_t i = 0; i < argTypes.size(); ++i) {
       TypePtr expectedType = funcSymbolOpt.value().type->params[i];
       TypePtr actualType = argTypes[i];
-      if (expectedType->base_type != actualType->base_type ||
-          expectedType->category != actualType->category) {
+      if (expectedType->category != actualType->category) {
         error(node->line, "e");
       }
     }

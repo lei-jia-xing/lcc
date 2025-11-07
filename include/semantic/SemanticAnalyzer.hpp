@@ -2,7 +2,6 @@
 #include "parser/AST.hpp"
 #include "semantic/SymbolTable.hpp"
 #include "semantic/Type.hpp"
-#include <memory>
 
 class SemanticAnalyzer {
 public:
@@ -11,9 +10,8 @@ public:
   void visit(CompUnit *node);
 
 private:
-  std::shared_ptr<SymbolTable> symbolTable;
+  SymbolTable symbolTable;
   int loop = 0;
-  bool has_return = false;
   TypePtr current_function_return_type = nullptr;
 
   void error(const int &line, const std::string errorType);
