@@ -4,25 +4,7 @@
 
 Parser（语法分析器）是 LCC 编译器的第二个阶段，负责将 Lexer 生成的 Token 流转换为抽象语法树（AST）。本文档详细介绍了 Parser 的设计架构、实现细节和使用方式。
 
-## 功能特性
-
-- **递归下降解析**：采用递归下降的解析方法，支持 LL(1) 文法
-- **完整的语法支持**：支持变量声明、函数定义、控制语句、表达式等完整语法
-- **错误恢复机制**：支持同步（Sync）和期望（Expect）错误处理策略
-- **AST 构建**：构建结构化的抽象语法树，便于后续语义分析和代码生成
-- **静默模式**：支持解析过程中的临时静默以禁用输出和错误打印
-
 ## 架构设计
-
-### 核心组件
-
-```
-Parser
-├── Lexer (词法分析器)
-├── Token (当前 Token)
-├── AST (抽象语法树定义)
-└── 递归下降解析引擎
-```
 
 ### 类结构
 
@@ -55,13 +37,6 @@ private:
    */
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);
-  /**
-   * @brief a function to synchronize the parser when an error occurs
-   *
-   * @param types when the next token is in this set, the parser recovers
-   */
-  void sync(const std::vector<TokenType> &types);
-  inline static int silentDepth = 0;
 
 public:
   /**
@@ -244,15 +219,6 @@ bool Parser::expect(const std::vector<TokenType> &types, const std::string &erro
 }
 ```
 
-#### 同步恢复（Sync）
-
-```cpp
-void Parser::sync(const std::vector<TokenType> &types) {
-  // 在静默模式下跳过 Token，直到找到同步点
-  // 用于错误恢复，避免级联错误
-}
-```
-
 ### 静默模式
 
 与 Lexer 类似，Parser 也实现了静默模式机制：
@@ -397,18 +363,6 @@ Parser 主要识别以下语法错误：
 - **j 类型错误**： 缺少右括号')'
 - **k 类型错误**：缺少右中括号']'
 
-### 错误报告格式
-
-```
-<行号> <错误类型>
-```
-
-示例：
-
-```
-10 i
-```
-
 ## 与其他组件的交互
 
 ### 与 Lexer 的交互
@@ -417,10 +371,13 @@ Parser 主要识别以下语法错误：
 - **前向查看**：通过 `lexer.peekToken(n)` 查看第 n 个未来的 Token
 - **静默同步**：通过 `silentPV()` 方法与 Lexer 的静默模式同步
 
-### 与后续阶段的接口
+## 文档补充
 
-Parser 生成的 AST 将作为以下阶段的输入：
+做到语义分析的时候，我预想的流式编译器设计似乎行不通了,还是需要扫描
+完整的AST树，因为在做Parser的时候，我根本没有想过类型相关的东西,因此
+我在AST节点中加入了类型信息，这部分的内容由语义分析来填充。
 
-- **语义分析器**：进行类型检查、作用域分析等
-- **中间代码生成器**：生成中间表示
-- **代码生成器**：生成目标代码
+并且之前是没有做输出的开关的，语义分析需要关闭，因此又做了一个极其简单
+的开关来控制输出,另外语义分析是需要其他的信息的，比如函数名的所在行数,
+'}'的所在行数，因此AST树又补充了一点信息，之前的设计和实际代码其实是不
+完全一样的,不过也差不多，反映了我的设计过程。
