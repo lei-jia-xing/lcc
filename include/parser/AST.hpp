@@ -164,6 +164,7 @@ class FuncDef : public ASTNode {
 public:
   std::unique_ptr<FuncType> funcType;
   std::string ident;
+  int identLine = 0;
   std::unique_ptr<FuncFParams> params;
   std::unique_ptr<Block> block;
 };
@@ -208,6 +209,7 @@ class FuncFParam : public ASTNode {
 public:
   std::unique_ptr<BType> bType;
   std::string ident;
+  int identLine = 0;
   bool isArray = false;
   TypePtr type;
 };

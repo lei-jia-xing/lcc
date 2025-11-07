@@ -9,21 +9,30 @@
 class SymbolTable {
 private:
   struct ScopeRecord {
-    int id = 0;
+    int level = 0;
     std::unordered_map<std::string, Symbol> table;
     std::vector<std::string> order;
   };
 
+  /**
+   * @brief records of all scopes
+   */
   std::vector<ScopeRecord> records;
+  /**
+   * @brief current active scopes, storing indices into records
+   */
   std::vector<size_t> active;
-  int nextId = 1;
+  /**
+   * @brief the child scope level generator
+   */
+  int nextLevel = 1;
 
 public:
   SymbolTable() { pushScope(); }
 
   void pushScope() {
     ScopeRecord rec;
-    rec.id = nextId++;
+    rec.level = nextLevel++;
     records.emplace_back(std::move(rec));
     active.push_back(records.size() - 1);
   }
@@ -60,7 +69,7 @@ public:
     for (const auto &rec : records) {
       for (const auto &name : rec.order) {
         const auto &sym = rec.table.at(name);
-        std::cout << rec.id << " " << sym.name << " " << to_string(sym.type)
+        std::cout << rec.level << " " << sym.name << " " << to_string(sym.type)
                   << std::endl;
       }
     }

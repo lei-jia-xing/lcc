@@ -1,7 +1,7 @@
 #include "parser/Parser.hpp"
+#include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Token.hpp"
 #include "parser/AST.hpp"
-#include "errorReporter/ErrorReporter.hpp"
 #include <iostream>
 #include <memory>
 
@@ -267,6 +267,7 @@ std::unique_ptr<FuncDef> Parser::parseFuncDef() {
   funcDef->funcType = parseFuncType();
   advance();
   funcDef->ident = current.lexeme;
+  funcDef->identLine = current.line;
   advance(); // eat ident
   if (current.type != TokenType::LPARENT) {
     // error();
@@ -347,6 +348,7 @@ std::unique_ptr<FuncFParam> Parser::parseFuncFParam() {
   funcFParam->bType = parseBType();
   advance();
   funcFParam->ident = current.lexeme;
+  funcFParam->identLine = current.line;
   // look ahead
   if (lexer.peekToken(1).type == TokenType::LBRACK) {
     advance(); // eat ident
