@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief the definition of ErrorReporter class
+ */
+
 #pragma once
 #include <iostream>
 #include <ostream>
@@ -7,7 +12,6 @@
 /**
  * @brief 错误报告器类
  * 负责收集、排序和打印所有编译错误
- * 供 lexer、parser 和 semantic 共同使用
  */
 class ErrorReporter {
 public:

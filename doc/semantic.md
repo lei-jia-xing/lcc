@@ -93,29 +93,50 @@ enum class Category { Basic, Array, Function };
 #### 类型类设计
 
 ```cpp
+enum class BaseType { VOID, INT };
+
 class Type {
 public:
+  enum class Category { Basic, Array, Function };
+
   Category category;
   BaseType base_type;
   bool is_const = false;
   bool is_static = false;
 
-  // 数组类型相关
   TypePtr array_element_type;
   int array_size = 0;
 
-  // 函数类型相关
   TypePtr return_type;
   std::vector<TypePtr> params;
 
-  // 类型创建工厂方法
-  static TypePtr create_base_type(BaseType base, bool is_const = false, bool is_static = false);
-  static TypePtr create_array_type(TypePtr element_type, int size);
-  static TypePtr create_function_type(TypePtr ret_type, const std::vector<TypePtr> &params);
+  Type(Category cat) : category(cat) {}
 
-  // 预定义类型
-  static TypePtr getIntType();
-  static TypePtr getVoidType();
+  static TypePtr create_base_type(BaseType base, bool is_const = false,
+                                  bool is_static = false) {
+    auto type = std::make_shared<Type>(Category::Basic);
+    type->is_const = is_const;
+    type->is_static = is_static;
+    type->base_type = base;
+    return type;
+  }
+
+  static TypePtr create_array_type(TypePtr element_type, int size) {
+    auto type = std::make_shared<Type>(Category::Array);
+    type->array_element_type = element_type;
+    type->array_size = size;
+    return type;
+  }
+
+  static TypePtr create_function_type(TypePtr ret_type,
+                                      const std::vector<TypePtr> &params) {
+    auto type = std::make_shared<Type>(Category::Function);
+    type->return_type = ret_type;
+    type->params = params;
+    return type;
+  }
+  static TypePtr getIntType() { return create_base_type(BaseType::INT); }
+  static TypePtr getVoidType() { return create_base_type(BaseType::VOID); }
 };
 ```
 
@@ -125,9 +146,9 @@ public:
 
 ```cpp
 struct Symbol {
-  std::string name;    // 符号名
-  TypePtr type;        // 符号类型
-  int line;           // 定义行号
+  std::string name;
+  TypePtr type;
+  int line;
 };
 ```
 
@@ -142,23 +163,66 @@ private:
     std::vector<std::string> order;
   };
 
-  std::vector<ScopeRecord> records;    // 所有作用域记录
-  std::vector<size_t> active;          // 当前活跃作用域栈
-  int nextLevel = 1;                   // 下一层级别号
+  /**
+   * @brief records of all scopes
+   */
+  std::vector<ScopeRecord> records;
+  /**
+   * @brief current active scopes, storing indices into records
+   */
+  std::vector<size_t> active;
+  /**
+   * @brief the child scope level generator
+   */
+  int nextLevel = 1;
 
 public:
-  SymbolTable();
+  SymbolTable() { pushScope(); }
 
-  // 作用域管理
-  void pushScope();
-  void popScope();
+  void pushScope() {
+    ScopeRecord rec;
+    rec.level = nextLevel++;
+    records.emplace_back(std::move(rec));
+    active.push_back(records.size() - 1);
+  }
 
-  // 符号管理
-  bool addSymbol(const Symbol &symbol);
-  std::optional<Symbol> findSymbol(const std::string &name) const;
+  void popScope() {
+    if (!active.empty()) {
+      active.pop_back();
+    }
+  }
 
-  // 调试输出
-  void printTable() const;
+  bool addSymbol(const Symbol &symbol) {
+    if (active.empty())
+      return false;
+    auto &rec = records[active.back()];
+    if (rec.table.count(symbol.name))
+      return false;
+    rec.table.emplace(symbol.name, symbol);
+    rec.order.push_back(symbol.name);
+    return true;
+  }
+
+  std::optional<Symbol> findSymbol(const std::string &name) const {
+    for (auto it = active.rbegin(); it != active.rend(); ++it) {
+      const auto &rec = records[*it];
+      auto f = rec.table.find(name);
+      if (f != rec.table.end()) {
+        return f->second;
+      }
+    }
+    return std::nullopt;
+  }
+
+  void printTable() const {
+    for (const auto &rec : records) {
+      for (const auto &name : rec.order) {
+        const auto &sym = rec.table.at(name);
+        std::cout << rec.level << " " << sym.name << " " << to_string(sym.type)
+                  << std::endl;
+      }
+    }
+  }
 };
 ```
 
@@ -168,7 +232,7 @@ public:
 
 1. **初始化**：创建符号表，设置全局作用域
 2. **编译单元分析**：遍历所有声明、函数定义和主函数
-3. **符号表构建**：在分析过程中填充符号表
+3. **符号表构建**：在分析过程中填充栈式符号表
 4. **类型检查**：对表达式进行类型推导和检查
 5. **控制流检查**：验证 break/continue/return 语句的正确性
 6. **输出生成**：输出符号表信息供后续阶段使用
@@ -193,30 +257,24 @@ public:
 
 ## 实现特性
 
-### 1. 作用域嵌套
-
-- 支持多层作用域嵌套（全局 → 函数 → 复合语句）
-- 符号查找遵循就近原则
-- 作用域退出时自动清理局部符号
-
-### 2. 类型推导
+### 类型推导
 
 - 自动推导表达式类型
-- 支持基本类型、数组类型、函数类型
+- 支持int、array、func
 - 类型信息存储在 AST 节点中供后续使用
 
-### 3. 常量和静态支持
+### 常量和静态支持
 
 - 支持常量定义和类型检查
 - 支持静态变量声明
 - 防止常量赋值操作
 
-### 4. 函数调用验证
+### 函数调用验证
 
 - 参数数量检查
 - 参数类型检查
 - 返回值类型验证
-- 内置函数特殊处理
+- 内置函数(getint())特殊处理
 
 ## 与其他组件的交互
 

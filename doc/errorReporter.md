@@ -13,6 +13,21 @@ ErrorReporter（错误报告器）是 LCC 编译器的统一错误收集和输�
 ### 类结构
 
 ```cpp
+/**
+ * @file
+ * @brief the definition of ErrorReporter class
+ */
+
+#pragma once
+#include <iostream>
+#include <ostream>
+#include <string>
+#include <vector>
+
+/**
+ * @brief 错误报告器类
+ * 负责收集、排序和打印所有编译错误
+ */
 class ErrorReporter {
 public:
   /**
@@ -90,7 +105,7 @@ void ErrorReporter::addError(int line, const std::string &type) {
 }
 ```
 
-### 4. 错误输出机制
+### 错误输出机制
 
 ```cpp
 void ErrorReporter::printErrors(std::ostream &outputStream) const {

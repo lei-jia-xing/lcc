@@ -30,6 +30,9 @@ private:
    */
   int lastVnline = 0;
 
+  /**
+   * @brief the output enabled flag
+   */
   bool outputEnabled = false;
   /**
    * @brief to the next token

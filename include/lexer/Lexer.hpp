@@ -21,6 +21,9 @@ private:
    */
   int line;
 
+  /**
+   * @brief the output enabled flag
+   */
   bool outputEnabled = false;
 
   /**

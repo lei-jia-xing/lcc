@@ -9,6 +9,11 @@ Parser（语法分析器）是 LCC 编译器的第二个阶段，负责将 Lexer
 ### 类结构
 
 ```cpp
+/**
+ * @class Parser
+ * @brief a class to parse tokens into an AST
+ *
+ */
 class Parser {
 private:
   /**
@@ -23,6 +28,11 @@ private:
    * @brief the last line number of a non-terminal being processed
    */
   int lastVnline = 0;
+
+  /**
+   * @brief the output enabled flag
+   */
+  bool outputEnabled = false;
   /**
    * @brief to the next token
    */
@@ -37,6 +47,7 @@ private:
    */
   bool expect(const std::vector<TokenType> &types,
               const std::string &errorType);
+  inline static int silentDepth = 0;
 
 public:
   /**
@@ -241,75 +252,6 @@ void Parser::silentPV(bool silent) {
 - 错误恢复期间的 Token 跳过
 - 前瞻性解析时的临时禁用输出
 
-### 表达式解析优化
-
-表达式解析采用优先级递增的方式：
-
-1. **PrimaryExp**：括号表达式、左值、数字常量
-2. **UnaryExp**：一元运算符、函数调用
-3. **MulExp**：乘除模运算
-4. **AddExp**：加减运算
-5. **RelExp**：关系运算
-6. **EqExp**：相等性运算
-7. **LAndExp**：逻辑与运算
-8. **LOrExp**：逻辑或运算
-
-每个层次都处理该优先级的运算符，并递归调用下一优先级的解析函数。
-
-## AST 节点类型
-
-### 声明节点
-
-- **CompUnit**：编译单元，包含声明、函数定义和主函数
-- **Decl**：声明基类
-- **ConstDecl**：常量声明
-- **VarDecl**：变量声明
-- **BType**：基本类型（int）
-- **ConstDef**：常量定义
-- **VarDef**：变量定义
-- **ConstInitVal**：常量初始值
-- **InitVal**：变量初始值
-
-### 函数节点
-
-- **FuncDef**：函数定义
-- **MainFuncDef**：主函数定义
-- **FuncType**：函数类型
-- **FuncFParams**：函数形参列表
-- **FuncFParam**：函数形参
-- **FuncRParams**：函数实参列表
-
-### 语句节点
-
-- **Stmt**：语句基类，包含语句类型枚举
-- **AssignStmt**：赋值语句
-- **ExpStmt**：表达式语句
-- **BlockStmt**：语句块
-- **IfStmt**：条件语句
-- **ForStmt**：循环语句
-- **BreakStmt**：跳出语句
-- **ContinueStmt**：继续语句
-- **ReturnStmt**：返回语句
-- **PrintfStmt**：输出语句
-- **ForAssignStmt**：for 循环赋值语句
-
-### 表达式节点
-
-- **Exp**：表达式
-- **Cond**：条件表达式
-- **LVal**：左值
-- **PrimaryExp**：基本表达式
-- **Number**：数字常量
-- **UnaryOp**：一元运算符
-- **UnaryExp**：一元表达式
-- **MulExp**：乘除模表达式
-- **AddExp**：加减表达式
-- **RelExp**：关系表达式
-- **EqExp**：相等性表达式
-- **LAndExp**：逻辑与表达式
-- **LOrExp**：逻辑或表达式
-- **ConstExp**：常量表达式
-
 ## 解析流程
 
 ### 主流程
@@ -323,7 +265,8 @@ void Parser::silentPV(bool silent) {
 
 ### 语句解析策略
 
-由于部分语句存在二义性（如标识符开头的可能是赋值语句或表达式语句），Parser 采用以下策略：
+由于部分语句存在二义性（如标识符开头的可能是赋值语句或表达式语句），Parser 采用以下策略向前看，并在这个过程中
+启动静默模式以避免不必要的输出，判断出要解析的语句类型后再恢复状态，按正确的语句类型进行解析：
 
 ```cpp
 if (current.type == TokenType::IDENFR) {
@@ -379,5 +322,4 @@ Parser 主要识别以下语法错误：
 
 并且之前是没有做输出的开关的，语义分析需要关闭，因此又做了一个极其简单
 的开关来控制输出,另外语义分析是需要其他的信息的，比如函数名的所在行数,
-'}'的所在行数，因此AST树又补充了一点信息，之前的设计和实际代码其实是不
-完全一样的,不过也差不多，反映了我的设计过程。
+'}'的所在行数，因此AST树又补充了一点信息。

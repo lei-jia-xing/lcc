@@ -10,8 +10,17 @@ public:
   void visit(CompUnit *node);
 
 private:
+  /**
+   * @brief symbol table for semantic analysis
+   */
   SymbolTable symbolTable;
+  /**
+   * @brief the loop depth for semantic analysis
+   */
   int loop = 0;
+  /**
+   * @brief the current function return type for checking return statements
+   */
   TypePtr current_function_return_type = nullptr;
 
   void error(const int &line, const std::string errorType);
