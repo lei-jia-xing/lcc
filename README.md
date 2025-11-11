@@ -10,7 +10,7 @@ This project is currently under development. The progress of each major componen
   - [x] Lexical Analysis (Lexer)
   - [x] Parsing (Parser)
   - [x] Abstract Syntax Tree (AST) Generation
-  - [ ] Semantic Analysis
+  - [x] Semantic Analysis
   - [ ] Intermediate Representation (IR) Generation
 - **Backend**
   - [ ] MIPS Assembly Generation
