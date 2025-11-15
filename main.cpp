@@ -36,7 +36,6 @@ int main() {
     semanticAnalyzer.visit(compUnit.get());
   }
 
-  // 打印所有错误（按行号排序）
   ErrorReporter::getInstance().printErrors();
 
   // 恢复原始输出流
