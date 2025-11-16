@@ -1,11 +1,8 @@
 # LCC 编译器设计文档
 
-> [!NOTE]
-> 本文档使用[Doxygen](https://www.doxygen.nl/)工具生成，这是C/C++社区常用的文档生成工具。
-
 ## 概述
 
-LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子集编译器，采用现代编译器设计原理，目标架构为 MIPS。本文档详细描述了编译器的整体架构、各组件设计、实现细节
+LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子集编译器,目标架构为 MIPS。本文档详细描述了编译器的整体架构、各组件设计、实现细节
 
 ## 编译器架构
 

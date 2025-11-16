@@ -22,21 +22,18 @@ public:
   void visit(CompUnit *node);
 
 private:
-  // 声明访问器
   void visit(Decl *node);
   void visit(ConstDecl *node);
   void visit(VarDecl *node);
   void visit(ConstDef *node, TypePtr type);
   void visit(VarDef *node, TypePtr type);
 
-  // 函数访问器
   void visit(FuncDef *node);
   void visit(MainFuncDef *node);
   void visit(FuncFParams *node);
   void visit(FuncFParam *node);
   TypePtr visit(FuncType *node);
 
-  // 语句访问器
   void visit(Block *node);
   void visit(BlockItem *node);
   void visit(Stmt *node);
@@ -51,7 +48,6 @@ private:
   void visit(PrintfStmt *node);
   void visit(ForAssignStmt *node);
 
-  // 表达式访问器（返回类型信息）
   TypePtr visit(Exp *node);
   TypePtr visit(Cond *node);
   TypePtr visit(LVal *node);
@@ -68,7 +64,6 @@ private:
   TypePtr visit(LOrExp *node);
   TypePtr visit(ConstExp *node);
 
-  // 初始化值访问器
   void visit(ConstInitVal *node);
   void visit(InitVal *node);
 };
@@ -92,6 +87,8 @@ enum class Category { Basic, Array, Function };
 
 #### 类型类设计
 
+对类型设计了几个工厂方法，方便创建不同类型的实例
+
 ```cpp
 enum class BaseType { VOID, INT };
 
@@ -105,7 +102,7 @@ public:
   bool is_static = false;
 
   TypePtr array_element_type;
-  int array_size = 0;
+  int array_size = 0; // 似乎没有用
 
   TypePtr return_type;
   std::vector<TypePtr> params;
@@ -153,6 +150,12 @@ struct Symbol {
 ```
 
 #### 作用域管理
+
+定义了一个栈式符号表，使用了`ScopeRecord`结构体来记录每个作用域的信息,对于整个
+符号表使用`records`来存储所有作用域的`level`,使用active来存储当前活跃的所有作用域索引。
+
+**规则**：
+进入新作用域时，调用`pushScope()`，离开作用域时，调用`popScope()`。在当前作用域添加符号时，调用`addSymbol()`。查找符号时，调用`findSymbol()`，从当前作用域开始向外查找。
 
 ```cpp
 class SymbolTable {
@@ -228,7 +231,7 @@ public:
 
 ## 语义分析流程
 
-### 1. 整体分析流程
+### 整体分析流程
 
 1. **初始化**：创建符号表，设置全局作用域
 2. **编译单元分析**：遍历所有声明、函数定义和主函数
@@ -255,27 +258,6 @@ public:
 
 所有错误通过 ErrorReporter 统一收集，最后按行号排序输出。
 
-## 实现特性
-
-### 类型推导
-
-- 自动推导表达式类型
-- 支持int、array、func
-- 类型信息存储在 AST 节点中供后续使用
-
-### 常量和静态支持
-
-- 支持常量定义和类型检查
-- 支持静态变量声明
-- 防止常量赋值操作
-
-### 函数调用验证
-
-- 参数数量检查
-- 参数类型检查
-- 返回值类型验证
-- 内置函数(getint())特殊处理
-
 ## 与其他组件的交互
 
 ### 与 Parser 的交互
@@ -283,14 +265,3 @@ public:
 - 接收完整的 AST 树进行遍历分析
 - 利用 AST 节点中的行号信息进行错误定位
 - 将类型信息写回 AST 节点供后续阶段使用
-
-### 符号表输出
-
-语义分析完成后，符号表内容会输出到标准输出，格式为：
-
-```
-<作用域级别> <符号名> <类型>
-```
-
-```
-
