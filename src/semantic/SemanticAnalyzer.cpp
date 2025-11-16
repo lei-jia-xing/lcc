@@ -31,7 +31,9 @@ void SemanticAnalyzer::visit(CompUnit *node) {
     visit(funcDef.get());
   }
   visit(node->mainFuncDef.get());
-  symbolTable.printTable();
+  if (outputenabled) {
+    symbolTable.printTable();
+  }
 }
 void SemanticAnalyzer::visit(Decl *node) {
   if (node == nullptr)

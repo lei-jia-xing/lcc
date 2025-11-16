@@ -23,6 +23,8 @@ private:
    */
   TypePtr current_function_return_type = nullptr;
 
+  bool outputenabled = false;
+
   void error(const int &line, const std::string errorType);
 
   void visit(Decl *node);

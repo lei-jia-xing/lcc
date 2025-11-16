@@ -16,13 +16,13 @@ public:
   CodeGen() = default;
   ~CodeGen() = default;
 
-  Function generate(CompUnit *root);
+  void generate(CompUnit *root);
 
   void reset();
 
 private:
   Function genFunction(FuncDef *funcDef);
-  Function genMain(MainFuncDef *mainDef);
+  Function genMainFuncDef(MainFuncDef *mainDef);
 
   void genBlock(Block *block);
   void genBlockItem(BlockItem *item);
@@ -44,6 +44,7 @@ private:
   void genVarDef(VarDef *def);
   void genConstInitVal(ConstInitVal *init, const std::shared_ptr<Symbol> &sym);
   void genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym);
+  Operand genConstExp(ConstExp *ce);
 
   Operand genExp(Exp *exp);
   Operand genCond(Cond *cond);
@@ -65,6 +66,8 @@ private:
   Operand newLabel();
   void placeLabel(const Operand &label);
 
+  std::shared_ptr<Symbol> internStringLiteral(const std::string &literal);
+
   std::shared_ptr<Symbol> internSymbol(const std::string &name,
                                        TypePtr type = nullptr);
 
@@ -77,6 +80,23 @@ private:
   } ctx_;
 
   std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
+  std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
+  int nextStringId_ = 0;
+  struct LoopContext {
+    int breakLabel;
+    int continueLabel;
+  };
+  std::vector<LoopContext> loopStack_;
+  void pushLoop(int breakLbl, int continueLbl) {
+    loopStack_.push_back({breakLbl, continueLbl});
+  }
+  void popLoop() {
+    if (!loopStack_.empty())
+      loopStack_.pop_back();
+  }
+  LoopContext *currentLoop() {
+    return loopStack_.empty() ? nullptr : &loopStack_.back();
+  }
 };
 
 } // namespace lcc::codegen

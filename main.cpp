@@ -4,13 +4,14 @@
 #include "semantic/SemanticAnalyzer.hpp"
 #include <fstream>
 #include <iostream>
+#include "codegen/CodeGen.hpp"
 
 int main() {
   std::ofstream errorfile("error.txt");
   std::streambuf *original_cerr = std::cerr.rdbuf();
   std::cerr.rdbuf(errorfile.rdbuf());
 
-  std::ofstream parserfile("symbol.txt");
+  std::ofstream parserfile("mips.txt");
   std::streambuf *original_cout = std::cout.rdbuf();
   std::cout.rdbuf(parserfile.rdbuf());
 
@@ -37,6 +38,13 @@ int main() {
   }
 
   ErrorReporter::getInstance().printErrors();
+
+  // Generate IR; output is internalized to std::cout which currently
+  // points to mips.txt
+  if (compUnit) {
+    lcc::codegen::CodeGen cg;
+    cg.generate(compUnit.get());
+  }
 
   // 恢复原始输出流
   std::cerr.rdbuf(original_cerr);

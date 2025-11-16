@@ -44,7 +44,6 @@ enum class OpCode {
 
 class Instruction {
 public:
-  // format op arg1, arg2, result
   Instruction(OpCode op, Operand a1, Operand a2, Operand res);
   Instruction(OpCode op, Operand a1, Operand res); // 一元或赋值
   Instruction(OpCode op,
