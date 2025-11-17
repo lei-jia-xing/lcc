@@ -16,6 +16,7 @@ void CodeGen::reset() {
   symbols_.clear();
   stringLiterals_.clear();
   nextStringId_ = 0;
+  globalsIR_.clear();
 }
 
 Operand CodeGen::newTemp() { return Operand::Temporary(ctx_.nextTempId++); }
@@ -26,18 +27,137 @@ void CodeGen::placeLabel(const Operand &label) {
   emit(Instruction::MakeLabel(label));
 }
 
-std::shared_ptr<Symbol> CodeGen::internStringLiteral(const std::string &literal) {
+void CodeGen::output(const std::string &line) {
+  if (!outputEnabled_) return;
+  std::cout << line << '\n';
+}
+
+std::shared_ptr<Symbol>
+CodeGen::internStringLiteral(const std::string &literal) {
   auto it = stringLiterals_.find(literal);
-  if (it != stringLiterals_.end()) return it->second;
-  // Create a unique symbol name for this literal
+  if (it != stringLiterals_.end())
+    return it->second;
   std::string name = ".fmt" + std::to_string(nextStringId_++);
   auto sym = std::make_shared<Symbol>(name, nullptr, 0);
   stringLiterals_[literal] = sym;
   return sym;
 }
+
+// ---- Constant evaluator for static initialization ----
+bool CodeGen::tryEvalConst(Number *num, int &outVal) {
+  if (!num) return false;
+  outVal = num->value;
+  return true;
+}
+
+bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
+  if (!pe) return false;
+  switch (pe->primaryType) {
+    case PrimaryExp::PrimaryType::NUMBER:
+      return tryEvalConst(pe->number.get(), outVal);
+    case PrimaryExp::PrimaryType::EXP:
+      return tryEvalConst(pe->exp.get(), outVal);
+    case PrimaryExp::PrimaryType::LVAL:
+      return false;
+  }
+  return false;
+}
+
+bool CodeGen::tryEvalConst(UnaryExp *ue, int &outVal) {
+  if (!ue) return false;
+  switch (ue->unaryType) {
+    case UnaryExp::UnaryType::PRIMARY:
+      return tryEvalConst(ue->primaryExp.get(), outVal);
+    case UnaryExp::UnaryType::FUNC_CALL:
+      return false;
+    case UnaryExp::UnaryType::UNARY_OP: {
+      int v;
+      if (!tryEvalConst(ue->unaryExp.get(), v)) return false;
+      if (!ue->unaryOp) return false;
+      switch (ue->unaryOp->op) {
+        case UnaryOp::OpType::PLUS: outVal = v; return true;
+        case UnaryOp::OpType::MINUS: outVal = -v; return true;
+        case UnaryOp::OpType::NOT: outVal = (v == 0 ? 1 : 0); return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+bool CodeGen::tryEvalConst(MulExp *me, int &outVal) {
+  if (!me) return false;
+  if (me->op == MulExp::OpType::NONE) {
+    return tryEvalConst(me->unaryExp.get(), outVal);
+  }
+  int lv, rv;
+  if (!tryEvalConst(me->left.get(), lv)) return false;
+  if (!tryEvalConst(me->unaryExp.get(), rv)) return false;
+  switch (me->op) {
+    case MulExp::OpType::MULT: outVal = lv * rv; return true;
+    case MulExp::OpType::DIV: if (rv == 0) return false; outVal = lv / rv; return true;
+    case MulExp::OpType::MOD: if (rv == 0) return false; outVal = lv % rv; return true;
+    default: return false;
+  }
+}
+
+bool CodeGen::tryEvalConst(AddExp *ae, int &outVal) {
+  if (!ae) return false;
+  if (ae->op == AddExp::OpType::NONE) {
+    return tryEvalConst(ae->mulExp.get(), outVal);
+  }
+  int lv, rv;
+  if (!tryEvalConst(ae->left.get(), lv)) return false;
+  if (!tryEvalConst(ae->mulExp.get(), rv)) return false;
+  switch (ae->op) {
+    case AddExp::OpType::PLUS: outVal = lv + rv; return true;
+    case AddExp::OpType::MINU: outVal = lv - rv; return true;
+    default: return false;
+  }
+}
+
+bool CodeGen::tryEvalConst(Exp *exp, int &outVal) {
+  if (!exp) return false;
+  return tryEvalConst(exp->addExp.get(), outVal);
+}
+
+// ---- General constant folding helpers ----
+bool CodeGen::foldUnary(Operand const &a, OpCode op, int &outVal) {
+  if (a.getType() != OperandType::ConstantInt) return false;
+  int v = a.asInt();
+  switch (op) {
+    case OpCode::NEG: outVal = -v; return true;
+    case OpCode::NOT: outVal = (v == 0 ? 1 : 0); return true;
+    default: return false;
+  }
+}
+
+bool CodeGen::foldBinary(Operand const &a, Operand const &b, OpCode op, int &outVal) {
+  if (a.getType() != OperandType::ConstantInt || b.getType() != OperandType::ConstantInt)
+    return false;
+  int av = a.asInt();
+  int bv = b.asInt();
+  switch (op) {
+    case OpCode::ADD: outVal = av + bv; return true;
+    case OpCode::SUB: outVal = av - bv; return true;
+    case OpCode::MUL: outVal = av * bv; return true;
+    case OpCode::DIV: if (bv == 0) return false; outVal = av / bv; return true;
+    case OpCode::MOD: if (bv == 0) return false; outVal = av % bv; return true;
+    case OpCode::EQ:  outVal = (av == bv) ? 1 : 0; return true;
+    case OpCode::NEQ: outVal = (av != bv) ? 1 : 0; return true;
+    case OpCode::LT:  outVal = (av <  bv) ? 1 : 0; return true;
+    case OpCode::LE:  outVal = (av <= bv) ? 1 : 0; return true;
+    case OpCode::GT:  outVal = (av >  bv) ? 1 : 0; return true;
+    case OpCode::GE:  outVal = (av >= bv) ? 1 : 0; return true;
+    case OpCode::AND: outVal = ((av != 0) && (bv != 0)) ? 1 : 0; return true;
+    case OpCode::OR:  outVal = ((av != 0) || (bv != 0)) ? 1 : 0; return true;
+    default: return false;
+  }
+}
 void CodeGen::generate(CompUnit *root) {
   reset();
-  if (!root) return;
+  if (!root)
+    return;
   for (auto &Decl : root->decls) {
     genDecl(Decl.get());
   }
@@ -47,18 +167,28 @@ void CodeGen::generate(CompUnit *root) {
   if (root->mainFuncDef) {
     genMainFuncDef(root->mainFuncDef.get());
   }
-
+  // Print all globals collected across the whole generation, including
+  // those emitted while lowering function-scope static variables
+  for (auto &inst : globalsIR_) {
+    output(inst.toString());
+  }
 }
 
 void CodeGen::emit(const Instruction &inst) {
   if (ctx_.curBlk) {
     ctx_.curBlk->addInstruction(inst);
+  } else {
+    globalsIR_.push_back(inst);
   }
 }
 
-Function CodeGen::genFunction(FuncDef *funcDef) {
+void CodeGen::emitGlobal(const Instruction &inst) {
+  globalsIR_.push_back(inst);
+}
+
+void CodeGen::genFunction(FuncDef *funcDef) {
   if (!funcDef)
-    return Function("empty");
+    return;
 
   Function func(funcDef->ident);
 
@@ -73,19 +203,14 @@ Function CodeGen::genFunction(FuncDef *funcDef) {
 
   ctx_.curBlk = func.createBlock();
 
-  // Handle function parameters: define locals and receive args
   if (funcDef->params) {
     int idx = 0;
     for (auto &p : funcDef->params->params) {
       if (!p)
         continue;
-      // Intern symbol for parameter name
       auto sym = internSymbol(p->ident, p->type);
-      // Define storage for the parameter (scalar or array-as-pointer treated as
-      // size 1)
       emit(Instruction::MakeDef(Operand::Variable(sym),
                                 Operand::ConstantInt(1)));
-      // Receive argument idx into this parameter variable: PARAM idx, <var>
       emit(Instruction(OpCode::PARAM, Operand::ConstantInt(idx),
                        Operand::Variable(sym)));
       idx++;
@@ -96,22 +221,20 @@ Function CodeGen::genFunction(FuncDef *funcDef) {
     genBlock(funcDef->block.get());
   }
 
-  // Internalize IR printing here
-  for (auto &blk : func.getBlocks()) {
-    for (auto &inst : blk->getInstructions()) {
-      std::cout << inst.toString() << '\n';
+    for (auto &blk : func.getBlocks()) {
+      for (auto &inst : blk->getInstructions()) {
+        output(inst.toString());
+      }
     }
-  }
 
   ctx_.func = savedFunc;
   ctx_.curBlk = savedBlk;
   ctx_.nextTempId = savedTempId;
   ctx_.nextLabelId = savedLabelId;
 
-  return func;
 }
 
-Function CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
+void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
   Function func("main");
 
   auto savedFunc = ctx_.func;
@@ -129,22 +252,17 @@ Function CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
     genBlock(mainDef->block.get());
   }
 
-  // 不必补return 0 ,没有return 0, 根据语义直接就报错了
-  // emit(Instruction::MakeReturn(Operand::ConstantInt(0)));
-
-  // Internalize IR printing for main
-  for (auto &blk : func.getBlocks()) {
-    for (auto &inst : blk->getInstructions()) {
-      std::cout << inst.toString() << '\n';
+    for (auto &blk : func.getBlocks()) {
+      for (auto &inst : blk->getInstructions()) {
+        output(inst.toString());
+      }
     }
-  }
 
   ctx_.func = savedFunc;
   ctx_.curBlk = savedBlk;
   ctx_.nextTempId = savedTempId;
   ctx_.nextLabelId = savedLabelId;
 
-  return func;
 }
 void CodeGen::genBlock(Block *block) {
   if (!block)
@@ -319,14 +437,13 @@ void CodeGen::genReturn(ReturnStmt *stmt) {
 void CodeGen::genPrintf(PrintfStmt *stmt) {
   if (!stmt)
     return;
-  // Lower printf to PARAMs + CALL printf
-  // First param: format string literal symbol
+
   auto fmtSym = internStringLiteral(stmt->formatString);
   emit(Instruction(OpCode::PARAM, Operand::Variable(fmtSym), Operand()));
-  // Then each expression argument
-  int argc = 1; // include format string
+  int argc = 1;
   for (auto &e : stmt->args) {
-    if (!e) continue;
+    if (!e)
+      continue;
     Operand v = genExp(e.get());
     emit(Instruction(OpCode::PARAM, v, Operand()));
     argc++;
@@ -379,12 +496,14 @@ void CodeGen::genConstDecl(ConstDecl *decl) {
 void CodeGen::genVarDecl(VarDecl *decl) {
   if (!decl)
     return;
-
+  bool prevStatic = curDeclIsStatic_;
+  curDeclIsStatic_ = decl->isStatic;
   for (auto &varDef : decl->varDefs) {
     if (varDef) {
       genVarDef(varDef.get());
     }
   }
+  curDeclIsStatic_ = prevStatic;
 }
 
 void CodeGen::genConstDef(ConstDef *def) {
@@ -406,14 +525,51 @@ void CodeGen::genConstDef(ConstDef *def) {
 void CodeGen::genVarDef(VarDef *def) {
   if (!def)
     return;
-  auto sym = internSymbol(def->ident);
-  Operand sizeOp = Operand::ConstantInt(1);
+  // Determine size
+  int sizeInt = 1;
   if (def->arraySize) {
     Operand sz = genConstExp(def->arraySize.get());
     if (sz.getType() == OperandType::ConstantInt)
-      sizeOp = sz;
+      sizeInt = sz.asInt();
   }
-  emit(Instruction::MakeDef(Operand::Variable(sym), sizeOp));
+
+  // Handle local static: promote to global and alias local name
+  if (curDeclIsStatic_ && ctx_.curBlk) {
+    std::string gname = std::string("_S_") + (ctx_.func ? ctx_.func->getName() : "fn") + "_" + def->ident;
+    auto gsym = internSymbol(gname);
+    // Alias local identifier to promoted global symbol for subsequent uses
+    symbols_[def->ident] = gsym;
+    // Emit DEF once
+    if (!definedGlobals_.count(gname)) {
+      definedGlobals_.insert(gname);
+      emitGlobal(Instruction::MakeDef(Operand::Variable(gsym), Operand::ConstantInt(sizeInt)));
+    }
+    // Try constant initialization at global time
+    if (def->initVal) {
+      // Non-array
+      if (!def->initVal->isArray) {
+        int val;
+        if (def->initVal->exp && tryEvalConst(def->initVal->exp.get(), val)) {
+          emitGlobal(Instruction::MakeAssign(Operand::ConstantInt(val), Operand::Variable(gsym)));
+        }
+        // else: runtime init not implemented yet (would require guard)
+      } else {
+        for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
+          auto &e = def->initVal->arrayExps[i];
+          if (!e) continue;
+          int val;
+          if (tryEvalConst(e.get(), val)) {
+            emitGlobal(Instruction::MakeStore(Operand::ConstantInt(val), Operand::Variable(gsym), Operand::ConstantInt(static_cast<int>(i))));
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  // Normal (non-static or top-level) variable
+  auto sym = internSymbol(def->ident);
+  emit(Instruction::MakeDef(Operand::Variable(sym), Operand::ConstantInt(sizeInt)));
   if (def->initVal) {
     genInitVal(def->initVal.get(), sym);
   }
@@ -475,7 +631,6 @@ Operand CodeGen::genConstExp(ConstExp *ce) {
 Operand CodeGen::genCond(Cond *cond) {
   if (!cond)
     return Operand::ConstantInt(0);
-  // 以值形式求 Cond：将 LOrExp 计算成整数，再与 0 比较得到 0/1
   Operand v = genLOr(cond->lOrExp.get());
   Operand r = newTemp();
   emit(Instruction::MakeBinary(OpCode::NEQ, v, Operand::ConstantInt(0), r));
@@ -603,18 +758,24 @@ Operand CodeGen::genUnary(UnaryExp *ue) {
   }
   case UnaryExp::UnaryType::UNARY_OP: {
     Operand operand = genUnary(ue->unaryExp.get());
-    Operand result = newTemp();
-
+    if (!ue->unaryOp) return operand;
     switch (ue->unaryOp->op) {
-    case UnaryOp::OpType::PLUS:
-      // Unary plus, no operation needed
-      return operand;
-    case UnaryOp::OpType::MINUS:
-      emit(Instruction::MakeUnary(OpCode::NEG, operand, result));
-      return result;
-    case UnaryOp::OpType::NOT:
-      emit(Instruction::MakeUnary(OpCode::NOT, operand, result));
-      return result;
+      case UnaryOp::OpType::PLUS:
+        return operand;
+      case UnaryOp::OpType::MINUS: {
+        int v;
+        if (foldUnary(operand, OpCode::NEG, v)) return Operand::ConstantInt(v);
+        Operand result = newTemp();
+        emit(Instruction::MakeUnary(OpCode::NEG, operand, result));
+        return result;
+      }
+      case UnaryOp::OpType::NOT: {
+        int v;
+        if (foldUnary(operand, OpCode::NOT, v)) return Operand::ConstantInt(v);
+        Operand result = newTemp();
+        emit(Instruction::MakeUnary(OpCode::NOT, operand, result));
+        return result;
+      }
     }
     break;
   }
@@ -632,8 +793,6 @@ Operand CodeGen::genMul(MulExp *me) {
 
   Operand left = genMul(me->left.get());
   Operand right = genUnary(me->unaryExp.get());
-  Operand result = newTemp();
-
   OpCode op;
   switch (me->op) {
   case MulExp::OpType::MULT:
@@ -648,7 +807,9 @@ Operand CodeGen::genMul(MulExp *me) {
   default:
     return Operand();
   }
-
+  int cv;
+  if (foldBinary(left, right, op, cv)) return Operand::ConstantInt(cv);
+  Operand result = newTemp();
   emit(Instruction::MakeBinary(op, left, right, result));
   return result;
 }
@@ -663,9 +824,10 @@ Operand CodeGen::genAdd(AddExp *ae) {
 
   Operand left = genAdd(ae->left.get());
   Operand right = genMul(ae->mulExp.get());
-  Operand result = newTemp();
-
   OpCode op = (ae->op == AddExp::OpType::PLUS) ? OpCode::ADD : OpCode::SUB;
+  int cv;
+  if (foldBinary(left, right, op, cv)) return Operand::ConstantInt(cv);
+  Operand result = newTemp();
   emit(Instruction::MakeBinary(op, left, right, result));
   return result;
 }
@@ -680,7 +842,6 @@ Operand CodeGen::genRel(RelExp *re) {
 
   Operand left = genRel(re->left.get());
   Operand right = genAdd(re->addExp.get());
-  Operand result = newTemp();
 
   OpCode op;
   switch (re->op) {
@@ -699,7 +860,9 @@ Operand CodeGen::genRel(RelExp *re) {
   default:
     return Operand();
   }
-
+  int cv;
+  if (foldBinary(left, right, op, cv)) return Operand::ConstantInt(cv);
+  Operand result = newTemp();
   emit(Instruction::MakeBinary(op, left, right, result));
   return result;
 }
@@ -714,9 +877,10 @@ Operand CodeGen::genEq(EqExp *ee) {
 
   Operand left = genEq(ee->left.get());
   Operand right = genRel(ee->relExp.get());
-  Operand result = newTemp();
-
   OpCode op = (ee->op == EqExp::OpType::EQL) ? OpCode::EQ : OpCode::NEQ;
+  int cv;
+  if (foldBinary(left, right, op, cv)) return Operand::ConstantInt(cv);
+  Operand result = newTemp();
   emit(Instruction::MakeBinary(op, left, right, result));
   return result;
 }
@@ -731,8 +895,9 @@ Operand CodeGen::genLAnd(LAndExp *la) {
 
   Operand left = genLAnd(la->left.get());
   Operand right = genEq(la->eqExp.get());
+  int cv;
+  if (foldBinary(left, right, OpCode::AND, cv)) return Operand::ConstantInt(cv);
   Operand result = newTemp();
-
   emit(Instruction::MakeBinary(OpCode::AND, left, right, result));
   return result;
 }
@@ -747,8 +912,9 @@ Operand CodeGen::genLOr(LOrExp *lo) {
 
   Operand left = genLOr(lo->left.get());
   Operand right = genLAnd(lo->lAndExp.get());
+  int cv;
+  if (foldBinary(left, right, OpCode::OR, cv)) return Operand::ConstantInt(cv);
   Operand result = newTemp();
-
   emit(Instruction::MakeBinary(OpCode::OR, left, right, result));
   return result;
 }
