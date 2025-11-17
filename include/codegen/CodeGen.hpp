@@ -7,6 +7,7 @@
 #include "parser/AST.hpp"
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace lcc::codegen {
@@ -21,8 +22,8 @@ public:
   void reset();
 
 private:
-  Function genFunction(FuncDef *funcDef);
-  Function genMainFuncDef(MainFuncDef *mainDef);
+  void genFunction(FuncDef *funcDef);
+  void genMainFuncDef(MainFuncDef *mainDef);
 
   void genBlock(Block *block);
   void genBlockItem(BlockItem *item);
@@ -62,9 +63,23 @@ private:
   std::vector<Operand> genFuncRParams(FuncRParams *params);
 
   void emit(const Instruction &inst);
+  void emitGlobal(const Instruction &inst);
   Operand newTemp();
   Operand newLabel();
   void placeLabel(const Operand &label);
+  void output(const std::string &line);
+
+  // Try to evaluate an Exp as a constant integer; returns true if succeed.
+  bool tryEvalConst(class Exp *exp, int &outVal);
+  bool tryEvalConst(class AddExp *ae, int &outVal);
+  bool tryEvalConst(class MulExp *me, int &outVal);
+  bool tryEvalConst(class UnaryExp *ue, int &outVal);
+  bool tryEvalConst(class PrimaryExp *pe, int &outVal);
+  bool tryEvalConst(class Number *num, int &outVal);
+
+  // General constant folding helpers for value-form ops
+  bool foldUnary(class Operand const &a, OpCode op, int &outVal);
+  bool foldBinary(class Operand const &a, class Operand const &b, OpCode op, int &outVal);
 
   std::shared_ptr<Symbol> internStringLiteral(const std::string &literal);
 
@@ -82,11 +97,15 @@ private:
   std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
   std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
   int nextStringId_ = 0;
+  bool outputEnabled_ = true;
+  bool curDeclIsStatic_ = false; // transient while lowering a VarDecl
+  std::unordered_set<std::string> definedGlobals_;
   struct LoopContext {
     int breakLabel;
     int continueLabel;
   };
   std::vector<LoopContext> loopStack_;
+  std::vector<Instruction> globalsIR_;
   void pushLoop(int breakLbl, int continueLbl) {
     loopStack_.push_back({breakLbl, continueLbl});
   }
