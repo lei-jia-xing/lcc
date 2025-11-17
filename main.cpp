@@ -39,14 +39,12 @@ int main() {
 
   ErrorReporter::getInstance().printErrors();
 
-  // Generate IR; output is internalized to std::cout which currently
-  // points to mips.txt
   if (compUnit) {
     lcc::codegen::CodeGen cg;
     cg.generate(compUnit.get());
   }
 
-  // 恢复原始输出流
+ 
   std::cerr.rdbuf(original_cerr);
   std::cout.rdbuf(original_cout);
 
