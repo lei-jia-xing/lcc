@@ -10,8 +10,8 @@ std::shared_ptr<BasicBlock> Function::createBlock() {
   return blk;
 }
 
-std::vector<std::shared_ptr<BasicBlock>> &Function::getBlocks() {
-  return _blocks;
-}
+const std::vector<std::shared_ptr<BasicBlock>>& Function::getBlocks() const { return _blocks; }
 
-const std::string &Function::getName() const { return _name; }
+std::vector<std::shared_ptr<BasicBlock>>& Function::getBlocks() { return _blocks; }
+
+const std::string& Function::getName() const { return _name; }
