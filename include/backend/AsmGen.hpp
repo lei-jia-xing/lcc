@@ -40,52 +40,51 @@ private:
   void emitTextSection(const IRModuleView &mod, std::ostream &out);
   void emitFunction(const codegen::Function *func, std::ostream &out);
 
-  // Instruction lowering (stubs for now)
   void lowerInstruction(const codegen::Instruction *inst, std::ostream &out);
 
-  // Operand/register helpers
   std::string regForTemp(int tempId) const;
-  // Ensure an operand value is in a register and return that register name.
-  // May emit li/la+lw 指令以装载常量或变量值。默认使用 $t9/$t8 作为临时。
   std::string ensureInReg(const codegen::Operand &op, std::ostream &out,
                           const char *immScratch = "$t9",
                           const char *varScratch = "$t8");
 
-  // Register allocation (placeholder: linear scan of temporaries)
-  int acquireTempRegister(int tempId); // returns register index
+  int acquireTempRegister(int tempId);
   void releaseTempRegister(int tempId);
   const RegDesc &reg(int idx) const { return regs_[idx]; }
   RegDesc &reg(int idx) { return regs_[idx]; }
 
-  // Helpers
   void comment(std::ostream &out, const std::string &txt);
 
-  // Function-local analysis
   void analyzeGlobals(const IRModuleView &mod);
   void analyzeFunctionLocals(const codegen::Function *func);
   void resetFunctionState();
 
 private:
   bool emitComments_ = true;
-  std::vector<RegDesc> regs_; // $t0-$t9 pool for temporaries
-  // CALL 参数缓冲管理（简化版，仅处理 <=4 参数寄存器路径）
-  int paramIndex_ = 0;                   // 0..3 -> $a0..$a3
-  const IRModuleView *curMod_ = nullptr; // 提供字符串表等
-  std::string curFuncName_;              // 当前函数名，用于唯一化本地标签
+  std::vector<RegDesc> regs_;
+  int paramIndex_ = 0;
+  const IRModuleView *curMod_ = nullptr;
+  std::string curFuncName_;
 
-  // Globals set for quick check
   std::unordered_set<std::string> globals_;
-  // Per-function locals: name -> {offset, size}
+  std::unordered_map<std::string, int> globalSizes_;
   struct LocalInfo {
     int offset = -1; // 相对 $sp 的正偏移
     int size = 1;    // 以 word 为单位
   };
   std::unordered_map<std::string, LocalInfo> locals_;
   int frameSize_ = 0; // 包含保存 $ra 的槽位（最小 4）
-  // Formal parameter binding: index -> var name (记录所有)
+  /**
+   * @brief param index -> formal parameter variable name mapping for current
+   */
   std::vector<std::string> formalParamByIndex_;
-  // Pending extra (>=4) call-site arguments collected until CALL
+  /**
+   * @brief >=4th arguments pending to be stored to stack for current function
+   */
   std::vector<codegen::Operand> pendingExtraArgs_;
+  /**
+   * @brief unified epilogue label for current function
+   */
+  std::string currentEpilogueLabel_;
 };
 
 } // namespace lcc::backend

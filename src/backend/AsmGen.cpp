@@ -8,10 +8,12 @@ using namespace lcc::backend;
 using namespace lcc::codegen;
 
 AsmGen::AsmGen() {
-  static const char *tRegs[10] = {"$t0", "$t1", "$t2", "$t3", "$t4",
-                                  "$t5", "$t6", "$t7", "$t8", "$t9"};
-  regs_.reserve(10);
-  for (int i = 0; i < 10; ++i) {
+  // Reserve $t7, $t8, $t9 exclusively for assembler scratch usage to avoid
+  // clobbering temporary results. Map temporaries only to $t0 - $t6.
+  static const char *tRegs[7] = {"$t0", "$t1", "$t2", "$t3",
+                                 "$t4", "$t5", "$t6"};
+  regs_.reserve(7);
+  for (int i = 0; i < 7; ++i) {
     regs_.push_back({tRegs[i], false, -1});
   }
 }
@@ -107,6 +109,93 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       break;
     }
   }
+  // Second pass: interpret simple LOAD/ASSIGN chains for scalar globals
+  // initialized from arrays tempValues maps temporary id -> constant int
+  std::unordered_map<int, int> tempValues;
+  // scalarValues maps scalar variable name -> constant int (only if known)
+  std::unordered_map<std::string, int> scalarValues;
+  // Seed scalarValues from constant ASSIGNs already captured into gmap (index
+  // 0)
+  for (auto &kvInit : gmap) {
+    if (kvInit.second.defined && kvInit.second.size == 1) {
+      scalarValues[kvInit.first] = kvInit.second.inits[0];
+    }
+  }
+  auto isConstArrayElement = [&](const std::string &arrName, int idx,
+                                 int &outVal) -> bool {
+    auto it = gmap.find(arrName);
+    if (it == gmap.end())
+      return false;
+    if (!it->second.defined)
+      return false;
+    if (idx < 0 || idx >= it->second.size)
+      return false;
+    outVal = it->second.inits[idx];
+    return true;
+  };
+  for (size_t i = 0; i < mod.globals.size(); ++i) {
+    const Instruction *inst = mod.globals[i];
+    if (!inst)
+      continue;
+    switch (inst->getOp()) {
+    case OpCode::ASSIGN: {
+      const Operand &src = inst->getArg1();
+      const Operand &dst = inst->getResult();
+      if (src.getType() == OperandType::ConstantInt &&
+          dst.getType() == OperandType::Variable) {
+        scalarValues[dst.asSymbol()->name] = src.asInt();
+      } else if (src.getType() == OperandType::Temporary &&
+                 dst.getType() == OperandType::Variable) {
+        int tid = src.asInt();
+        auto tIt = tempValues.find(tid);
+        if (tIt != tempValues.end()) {
+          scalarValues[dst.asSymbol()->name] = tIt->second;
+        }
+      }
+      break;
+    }
+    case OpCode::LOAD: {
+      // LOAD base, idx, dstTemp
+      const Operand &base = inst->getArg1();
+      const Operand &idxOp = inst->getArg2();
+      const Operand &dst = inst->getResult();
+      if (base.getType() == OperandType::Variable &&
+          dst.getType() == OperandType::Temporary) {
+        int idxVal = -1;
+        bool hasIdx = false;
+        if (idxOp.getType() == OperandType::ConstantInt) {
+          idxVal = idxOp.asInt();
+          hasIdx = true;
+        } else if (idxOp.getType() == OperandType::Variable) {
+          auto vname = idxOp.asSymbol()->name;
+          auto svIt = scalarValues.find(vname);
+          if (svIt != scalarValues.end()) {
+            idxVal = svIt->second;
+            hasIdx = true;
+          }
+        }
+        if (hasIdx) {
+          int val = 0;
+          if (isConstArrayElement(base.asSymbol()->name, idxVal, val)) {
+            tempValues[dst.asInt()] = val;
+          }
+        }
+      }
+      break;
+    }
+    default:
+      break;
+    }
+  }
+  // Apply scalarValues back into gmap for single-word globals lacking explicit
+  // constant init (e.g. c = b[a])
+  for (auto &pair : scalarValues) {
+    auto gIt = gmap.find(pair.first);
+    if (gIt != gmap.end() && gIt->second.size == 1) {
+      gIt->second.inits[0] = pair.second;
+    }
+  }
+
   for (auto &kv : gmap) {
     const std::string &name = kv.first;
     const GInfo &gi = kv.second;
@@ -122,6 +211,11 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
   }
   out << "\n";
 }
+
+// Enhanced global initializer evaluation including array element based scalar
+// init (e.g. int c = b[a];) We perform a lightweight symbolic interpretation
+// over globals IR to fold simple LOAD/ASSIGN chains. NOTE: This must run before
+// emitting the .data section; called from generate() through emitDataSection.
 
 void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << ".text\n";
@@ -215,7 +309,6 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   out << "sw $fp,4($sp)\n";
   out << "move $fp, $sp\n";
 
-  // Bind formal parameters ($a0-$a3) into their local stack slots
   static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
   size_t fsz = formalParamByIndex_.size();
   for (size_t i = 0; i < fsz && i < 4; ++i) {
@@ -228,9 +321,6 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
       out << "sw " << aregs[i] << ", " << off << "($fp)\n";
     }
   }
-  // For parameters beyond 4: load from caller stack at entry
-  // old_sp = $fp + frameSize_ ; extras start at old_sp + 16 (home area for
-  // $a0-$a3)
   if (fsz > 4) {
     for (size_t i = 4; i < fsz; ++i) {
       const std::string &v = formalParamByIndex_[i];
@@ -246,16 +336,17 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
       out << "sw $t8, " << offLocal << "($fp)\n";
     }
   }
-  // Walk basic blocks sequentially (current IR stores linear order)
+  // Establish a unified epilogue label for early returns
+  currentEpilogueLabel_ = func->getName() + std::string("_END");
+
   for (auto &blk : func->getBlocks()) {
-    comment(out, std::string("block ") + std::to_string(blk->getId()));
     for (auto &inst : blk->getInstructions()) {
       lowerInstruction(&inst, out);
     }
   }
-  // Epilogue
+  // Emit epilogue label before teardown so all RETURN paths converge
+  out << currentEpilogueLabel_ << ":\n";
   if (func->getName() == "main") {
-    // Exit program in SPIM/MARS: syscall 10 (exit)
     out << "move $sp, $fp\n";
     out << "lw $fp,4($sp)\n";
     out << "lw $ra,0($sp)\n";
@@ -272,6 +363,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   out << "\n";
   curFuncName_.clear();
+  currentEpilogueLabel_.clear();
 }
 
 void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
@@ -369,7 +461,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::IF: {
-    // IF cond, label (label in result)
     std::string rcond = ensureInReg(a1, out);
     out << "bne " << rcond << ", $zero, " << labelName(res) << "\n";
     break;
@@ -401,9 +492,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::MUL:
   case OpCode::DIV:
   case OpCode::MOD: {
-    // Use distinct scratch registers for two operands to avoid clobbering
-    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-    std::string rb = ensureInReg(a2, out, "$t5", "$t7");
+  std::string ra = ensureInReg(a1, out, "$t9", "$t8");
+  std::string rb = ensureInReg(a2, out, "$t7", "$t7");
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     switch (op) {
     case OpCode::ADD:
@@ -426,7 +516,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     default:
       break;
     }
-    // If destination is a variable, store back
     if (isVar(res)) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
@@ -461,8 +550,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::LE:
   case OpCode::GT:
   case OpCode::GE: {
-    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-    std::string rb = ensureInReg(a2, out, "$t5", "$t7");
+  std::string ra = ensureInReg(a1, out, "$t9", "$t8");
+  std::string rb = ensureInReg(a2, out, "$t7", "$t7");
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     switch (op) {
     case OpCode::LT:
@@ -494,7 +583,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($sp)\n";
+        out << "sw " << rd << ", " << lit->second.offset
+            << "($fp)\n"; // store comparison result in local
       } else {
         out << "la $t7, " << name << "\n";
         out << "sw " << rd << ", 0($t7)\n";
@@ -520,7 +610,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   }
   case OpCode::AND:
   case OpCode::OR: {
-    // 规范化为 0/1 后做位与/或
     std::string ra = ensureInReg(a1, out);
     std::string rb = ensureInReg(a2, out);
     std::string ra1 = "$t6";
@@ -548,19 +637,30 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     // LOAD base, idx, dst
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     if (isVar(a1)) {
-      auto name = a1.asSymbol()->name;
+      auto sym = a1.asSymbol();
+      std::string name = sym->name;
+      bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        // $t8 = $fp + offset
-        out << "addiu $t8, $fp, " << lit->second.offset << "\n";
+        if (isArray) {
+          out << "addiu $t8, $fp, " << lit->second.offset << "\n"; // local array base
+        } else {
+          out << "lw $t8, " << lit->second.offset << "($fp)\n"; // local scalar/pointer value
+        }
       } else {
-        out << "la $t8, " << name << "\n";
+        if (isArray) {
+          out << "la $t8, " << name << "\n"; // global array base
+        } else {
+          out << "la $t8, " << name << "\n";
+          out << "lw $t8, 0($t8)\n"; // global scalar/pointer value
+        }
       }
       if (isConst(a2)) {
         int off = a2.asInt() * 4;
         out << "lw " << rd << ", " << off << "($t8)\n";
       } else {
-        std::string ri = ensureInReg(a2, out);
+        // Use distinct scratch register for index to avoid clobbering $t8 base
+        std::string ri = ensureInReg(a2, out, "$t9", "$t7");
         out << "sll $t7, " << ri << ", 2\n";
         out << "addu $t8, $t8, $t7\n";
         out << "lw " << rd << ", 0($t8)\n";
@@ -582,20 +682,30 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     // STORE val, base, index
     std::string rv = ensureInReg(a1, out);
     if (isVar(a2)) {
-      auto name = a2.asSymbol()->name;
+      auto sym = a2.asSymbol();
+      std::string name = sym->name;
+      bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "addiu $t8, $fp, " << lit->second.offset << "\n";
+        if (isArray) {
+          out << "addiu $t8, $fp, " << lit->second.offset << "\n";
+        } else {
+          out << "lw $t8, " << lit->second.offset << "($fp)\n";
+        }
       } else {
-        out << "la $t8, " << name << "\n";
+        if (isArray) {
+          out << "la $t8, " << name << "\n";
+        } else {
+          out << "la $t8, " << name << "\n";
+          out << "lw $t8, 0($t8)\n";
+        }
       }
     }
-    // index is in result operand per MakeStore
-    auto &idxOp = res; // index stored in result per Instruction::MakeStore
+    auto &idxOp = res;
     if (isConst(idxOp)) {
       out << "sw " << rv << ", " << (idxOp.asInt() * 4) << "($t8)\n";
     } else {
-      std::string ri = ensureInReg(idxOp, out);
+      std::string ri = ensureInReg(idxOp, out, "$t9", "$t7");
       out << "sll $t7, " << ri << ", 2\n";
       out << "addu $t8, $t8, $t7\n";
       out << "sw " << rv << ", 0($t8)\n";
@@ -603,27 +713,36 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::PARAM: {
-    // Two forms:
-    // 1) Formal parameter binding at function entry: a1=idx(const), result=var
-    //    -> handled in prologue; here no-op.
     if (isConst(a1) && isVar(res)) {
-      // formal binding already stored to stack; ignore
       break;
     }
-    // 2) Call-site argument: collect or place into $a0-$a3
     int idx = paramIndex_++;
     if (idx < 4) {
       static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
       if (isVar(a1)) {
-        // string literal or variable
         std::string name = a1.asSymbol()->name;
         bool isStr = curMod_ && curMod_->stringLiterals.find(name) !=
                                     curMod_->stringLiterals.end();
         if (isStr) {
           out << "la " << aregs[idx] << ", " << name << "\n";
         } else {
-          std::string r = ensureInReg(a1, out);
-          out << "move " << aregs[idx] << ", " << r << "\n";
+          // Check if this is an array (pass address) or scalar (pass value)
+          auto sym = a1.asSymbol();
+          bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
+          
+          if (locals_.find(name) == locals_.end()) {
+            // Global variable
+            out << "la " << aregs[idx] << ", " << name << "\n";
+            if (!isArray) {
+              // Scalar global: load its value
+              out << "lw " << aregs[idx] << ", 0(" << aregs[idx] << ")\n";
+            }
+            // Array global: address already loaded, don't dereference
+          } else {
+            // Local variable
+            std::string r = ensureInReg(a1, out);
+            out << "move " << aregs[idx] << ", " << r << "\n";
+          }
         }
       } else if (isConst(a1)) {
         out << "li " << aregs[idx] << ", " << a1.asInt() << "\n";
@@ -632,23 +751,17 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         out << "move " << aregs[idx] << ", " << r << "\n";
       }
     } else {
-      // Buffer extra args; we'll push them at CALL in reverse order
       pendingExtraArgs_.push_back(a1);
     }
     break;
   }
   case OpCode::CALL: {
-    // arg1 = argc, arg2 = func symbol, result = ret temp
-    // Push extra (>4) args in reverse order so that at callee entry
-    // arg with idx=4 is at 0($sp), idx=5 at 4($sp), ...
     if (!pendingExtraArgs_.empty()) {
-      // Reserve 16-byte home area for $a0-$a3 plus space for extras.
       int n = static_cast<int>(pendingExtraArgs_.size());
       int total = 16 + n * 4;
-      // Preserve old $sp in $t1 to compute base = old_sp + 16
       out << "move $t1, $sp\n";
       out << "addiu $sp, $sp, -" << total << "\n";
-      out << "addiu $t1, $t1, 16\n"; // base to store extras
+      out << "addiu $t1, $t1, 16\n";
       for (int i = 0; i < n; ++i) {
         const Operand &arg = pendingExtraArgs_[static_cast<size_t>(i)];
         std::string r = ensureInReg(arg, out);
@@ -662,31 +775,32 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       std::string rd = regForTemp(res.asInt());
       out << "move " << rd << ", $v0\n";
     }
-    // Pop extra args
     if (!pendingExtraArgs_.empty()) {
       int n = static_cast<int>(pendingExtraArgs_.size());
       int bytes = 16 + n * 4;
       out << "addiu $sp, $sp, " << bytes << "\n";
       pendingExtraArgs_.clear();
     }
-    paramIndex_ = 0; // reset
+    paramIndex_ = 0;
     break;
   }
   case OpCode::RETURN: {
-    // Note: RETURN value is encoded in 'result' operand by MakeReturn
     if (res.getType() != OperandType::Empty) {
-      if (isConst(res))
+      if (isConst(res)) {
         out << "li $v0, " << res.asInt() << "\n";
-      else {
+      } else {
         std::string r = ensureInReg(res, out);
         out << "move $v0, " << r << "\n";
       }
     }
-    // epilogue and jr $ra 由 emitFunction 统一输出
+    // Jump to unified epilogue label to prevent fallthrough overwrites
+    if (!currentEpilogueLabel_.empty()) {
+      out << "j " << currentEpilogueLabel_ << "\n";
+    }
     break;
   }
   case OpCode::DEF: {
-    // 已由 .data 处理，这里忽略
+    // 已由 .data 处理
     break;
   }
   case OpCode::PRINTF: {
@@ -711,18 +825,29 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
     out << "li " << immScratch << ", " << op.asInt() << "\n";
     return immScratch;
   case OperandType::Variable: {
-    auto name = op.asSymbol()->name;
+    auto sym = op.asSymbol();
+    std::string name = sym->name;
+    bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
     auto lit = locals_.find(name);
     if (lit != locals_.end()) {
-      out << "lw " << varScratch << ", " << lit->second.offset << "($fp)\n";
+      if (isArray) {
+        out << "addiu " << varScratch << ", $fp, " << lit->second.offset << "\n"; // local array address
+      } else {
+        out << "lw " << varScratch << ", " << lit->second.offset << "($fp)\n"; // local scalar/pointer value
+      }
       return varScratch;
     }
-    out << "la " << varScratch << ", " << name << "\n";
-    out << "lw " << varScratch << ", 0(" << varScratch << ")\n";
-    return varScratch;
+    // Global variable
+    if (isArray) {
+      out << "la " << varScratch << ", " << name << "\n"; // global array address
+      return varScratch;
+    } else {
+      out << "la " << varScratch << ", " << name << "\n";
+      out << "lw " << varScratch << ", 0(" << varScratch << ")\n"; // global scalar/pointer value
+      return varScratch;
+    }
   }
   case OperandType::Label:
-    // 不作为通用寄存器值使用
     comment(out, "unexpected label operand where register expected");
     return "$zero";
   case OperandType::Empty:
@@ -732,7 +857,6 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
 }
 
 int AsmGen::acquireTempRegister(int tempId) {
-  // Very naive: first free reg
   for (size_t i = 0; i < regs_.size(); ++i) {
     if (!regs_[i].inUse) {
       regs_[i].inUse = true;
@@ -740,7 +864,7 @@ int AsmGen::acquireTempRegister(int tempId) {
       return static_cast<int>(i);
     }
   }
-  return -1; // signal spill needed later
+  return -1;
 }
 
 void AsmGen::releaseTempRegister(int tempId) {
@@ -761,13 +885,24 @@ void AsmGen::comment(std::ostream &out, const std::string &txt) {
 
 void AsmGen::analyzeGlobals(const IRModuleView &mod) {
   globals_.clear();
+  globalSizes_.clear();
   for (auto *inst : mod.globals) {
     if (!inst)
       continue;
     if (inst->getOp() == OpCode::DEF) {
       const auto &a1 = inst->getArg1();
       if (a1.getType() == OperandType::Variable) {
-        globals_.insert(a1.asSymbol()->name);
+        std::string name = a1.asSymbol()->name;
+        globals_.insert(name);
+        int sz = 1;
+        if (inst->getArg2().getType() == OperandType::ConstantInt) {
+          sz = inst->getArg2().asInt();
+        } else if (inst->getResult().getType() == OperandType::ConstantInt) {
+          sz = inst->getResult().asInt();
+        }
+        if (sz < 1)
+          sz = 1;
+        globalSizes_[name] = sz;
       }
     }
   }
@@ -782,8 +917,6 @@ void AsmGen::resetFunctionState() {
 }
 
 void AsmGen::analyzeFunctionLocals(const Function *func) {
-  // Collect local DEFs and formal PARAM bindings at the beginning of block 0
-  // Reserve 0($fp) for $ra, 4($fp) for saved $fp; locals start at 8($fp)
   int nextOffset = 8; // 0: $ra, 4: $fp, >=8: locals/params
   formalParamByIndex_.clear();
   bool inEntryParamRun = true;
@@ -807,9 +940,7 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
               formalParamByIndex_.resize(static_cast<size_t>(idx + 1));
             std::string vname = res.asSymbol()->name;
             formalParamByIndex_[static_cast<size_t>(idx)] = vname;
-            // Ensure a local slot exists for this param (size 1)
-            if (globals_.find(vname) == globals_.end() &&
-                locals_.find(vname) == locals_.end()) {
+            if (locals_.find(vname) == locals_.end()) {
               locals_[vname] = {nextOffset, 1};
               nextOffset += 4;
             }
@@ -823,29 +954,27 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
         if (inst.getArg2().getType() == OperandType::ConstantInt) {
           sz = inst.getArg2().asInt();
         } else if (inst.getResult().getType() == OperandType::ConstantInt) {
-          // DEF is encoded as (op, symbol, size) using the 2-operand ctor,
-          // so size may be stored in 'result'
           sz = inst.getResult().asInt();
         }
         if (sym.getType() == OperandType::Variable) {
           std::string name = sym.asSymbol()->name;
-          if (globals_.find(name) == globals_.end() &&
-              locals_.find(name) == locals_.end()) {
+          // Local DEF shadows global even if same name; allocate if not
+          // already.
+          if (locals_.find(name) == locals_.end()) {
             int words = sz > 0 ? sz : 1;
             locals_[name] = {nextOffset, words};
             nextOffset += words * 4;
           }
         }
-        continue; // DEFs do not terminate the entry PARAM run
+        continue;
       }
-      // Any other op ends the formal PARAM run
       if (isFirstBlock)
         inEntryParamRun = false;
     }
     isFirstBlock = false;
   }
-  // Align frame size up to 8 bytes (MIPS o32 stack alignment)
-  frameSize_ = nextOffset; // include $ra and $fp slots
+  // Align frame size up to 8 bytes
+  frameSize_ = nextOffset;
   int rem = frameSize_ % 8;
   if (rem != 0)
     frameSize_ += (8 - rem);
