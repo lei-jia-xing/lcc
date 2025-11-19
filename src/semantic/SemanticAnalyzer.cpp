@@ -89,6 +89,7 @@ void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
     elem->category = Type::Category::Basic;
     defType = Type::create_array_type(elem, 0);
   }
+  node->type = defType; // Store type in AST node
   Symbol symbol(node->ident, defType, node->line);
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
@@ -108,6 +109,7 @@ void SemanticAnalyzer::visit(VarDef *node, TypePtr type) {
     elem->category = Type::Category::Basic;
     defType = Type::create_array_type(elem, 0);
   }
+  node->type = defType; // Store type in AST node
   Symbol symbol(node->ident, defType, node->line);
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");

@@ -116,6 +116,7 @@ public:
   std::string ident;
   std::unique_ptr<ConstExp> arraySize;
   std::unique_ptr<ConstInitVal> constinitVal;
+  TypePtr type; // Populated by semantic analysis
 };
 
 /**
@@ -129,6 +130,7 @@ public:
   std::string ident;
   std::unique_ptr<ConstExp> arraySize;
   std::unique_ptr<InitVal> initVal;
+  TypePtr type; // Populated by semantic analysis
 };
 
 /**
