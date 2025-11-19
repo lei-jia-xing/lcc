@@ -10,4 +10,4 @@ add_subdirectory(src)
 
 add_executable(Compiler main.cpp)
 
-target_link_libraries(Compiler lexer parser semanticanalyzer errorReporter codegen)
+target_link_libraries(Compiler lexer parser semanticanalyzer errorReporter codegen backend)

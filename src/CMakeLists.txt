@@ -10,6 +10,11 @@ add_library(codegen
     codegen/Instruction.cpp
     codegen/Operand.cpp)
 
+add_library(backend
+    backend/AsmGen.cpp)
+
+target_include_directories(backend PUBLIC ${CMAKE_SOURCE_DIR}/include)
+
 target_include_directories(lexer PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(parser PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(semanticanalyzer PUBLIC ${CMAKE_SOURCE_DIR}/include)
