@@ -109,13 +109,8 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       break;
     }
   }
-  // Second pass: interpret simple LOAD/ASSIGN chains for scalar globals
-  // initialized from arrays tempValues maps temporary id -> constant int
   std::unordered_map<int, int> tempValues;
-  // scalarValues maps scalar variable name -> constant int (only if known)
   std::unordered_map<std::string, int> scalarValues;
-  // Seed scalarValues from constant ASSIGNs already captured into gmap (index
-  // 0)
   for (auto &kvInit : gmap) {
     if (kvInit.second.defined && kvInit.second.size == 1) {
       scalarValues[kvInit.first] = kvInit.second.inits[0];
@@ -187,8 +182,6 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       break;
     }
   }
-  // Apply scalarValues back into gmap for single-word globals lacking explicit
-  // constant init (e.g. c = b[a])
   for (auto &pair : scalarValues) {
     auto gIt = gmap.find(pair.first);
     if (gIt != gmap.end() && gIt->second.size == 1) {
@@ -212,11 +205,6 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
   out << "\n";
 }
 
-// Enhanced global initializer evaluation including array element based scalar
-// init (e.g. int c = b[a];) We perform a lightweight symbolic interpretation
-// over globals IR to fold simple LOAD/ASSIGN chains. NOTE: This must run before
-// emitting the .data section; called from generate() through emitDataSection.
-
 void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << ".text\n";
   for (auto *func : mod.functions) {
@@ -238,7 +226,6 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
       continue;
     emitFunction(func, out);
   }
-  out << "# printf shim: supports only %d (up to 3 integer args in $a1-$a3)\n";
   out << "printf:\n";
   out << "  move $t4, $a0\n";
   out << "  li   $t5, 0\n";
@@ -321,22 +308,19 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
       out << "sw " << aregs[i] << ", " << off << "($fp)\n";
     }
   }
-  if (fsz > 4) {
-    for (size_t i = 4; i < fsz; ++i) {
-      const std::string &v = formalParamByIndex_[i];
-      if (v.empty())
-        continue;
-      auto it = locals_.find(v);
-      if (it == locals_.end())
-        continue;
-      int offLocal = it->second.offset;
-      int offCaller = static_cast<int>((i - 4) * 4);
-      int baseFromFp = frameSize_ + 16 + offCaller;
-      out << "lw $t8, " << baseFromFp << "($fp)\n";
-      out << "sw $t8, " << offLocal << "($fp)\n";
-    }
+  for (size_t i = 4; i < fsz; ++i) {
+    const std::string &v = formalParamByIndex_[i];
+    if (v.empty())
+      continue;
+    auto it = locals_.find(v);
+    if (it == locals_.end())
+      continue;
+    int offLocal = it->second.offset;
+    int offCaller = static_cast<int>((i - 4) * 4);
+    int baseFromFp = frameSize_ + 16 + offCaller;
+    out << "lw $t8, " << baseFromFp << "($fp)\n";
+    out << "sw $t8, " << offLocal << "($fp)\n";
   }
-  // Establish a unified epilogue label for early returns
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
   for (auto &blk : func->getBlocks()) {
@@ -344,22 +328,20 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
       lowerInstruction(&inst, out);
     }
   }
-  // Emit epilogue label before teardown so all RETURN paths converge
   out << currentEpilogueLabel_ << ":\n";
   if (func->getName() == "main") {
-    out << "move $sp, $fp\n";
-    out << "lw $fp,4($sp)\n";
-    out << "lw $ra,0($sp)\n";
-    out << "addiu $sp,$sp," << frameSize_ << "\n";
-    out << "li $v0, 10\n";
-    out << "syscall\n";
+    out << "  move $sp, $fp\n";
+    out << "  lw $fp,4($sp)\n";
+    out << "  lw $ra,0($sp)\n";
+    out << "  addiu $sp,$sp," << frameSize_ << "\n";
+    out << "  li $v0, 10\n";
+    out << "  syscall\n";
   } else {
-    out << "move $sp, $fp\n";
-    out << "lw $fp,4($sp)\n";
-    out << "lw $ra,0($sp)\n";
-    out << "addiu $sp,$sp," << frameSize_ << "\n";
-    comment(out, "epilogue");
-    out << "jr $ra\n";
+    out << "  move $sp, $fp\n";
+    out << "  lw $fp,4($sp)\n";
+    out << "  lw $ra,0($sp)\n";
+    out << "  addiu $sp,$sp," << frameSize_ << "\n";
+    out << "  jr $ra\n";
   }
   out << "\n";
   curFuncName_.clear();
@@ -368,64 +350,6 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 
 void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   auto op = inst->getOp();
-  auto opToStr = [&](OpCode oc) {
-    switch (oc) {
-    case OpCode::ADD:
-      return "ADD";
-    case OpCode::SUB:
-      return "SUB";
-    case OpCode::MUL:
-      return "MUL";
-    case OpCode::DIV:
-      return "DIV";
-    case OpCode::MOD:
-      return "MOD";
-    case OpCode::NEG:
-      return "NEG";
-    case OpCode::EQ:
-      return "EQ";
-    case OpCode::NEQ:
-      return "NEQ";
-    case OpCode::LT:
-      return "LT";
-    case OpCode::LE:
-      return "LE";
-    case OpCode::GT:
-      return "GT";
-    case OpCode::GE:
-      return "GE";
-    case OpCode::AND:
-      return "AND";
-    case OpCode::OR:
-      return "OR";
-    case OpCode::NOT:
-      return "NOT";
-    case OpCode::ASSIGN:
-      return "ASSIGN";
-    case OpCode::LOAD:
-      return "LOAD";
-    case OpCode::STORE:
-      return "STORE";
-    case OpCode::IF:
-      return "IF";
-    case OpCode::GOTO:
-      return "GOTO";
-    case OpCode::LABEL:
-      return "LABEL";
-    case OpCode::PARAM:
-      return "PARAM";
-    case OpCode::CALL:
-      return "CALL";
-    case OpCode::RETURN:
-      return "RETURN";
-    case OpCode::PRINTF:
-      return "PRINTF";
-    case OpCode::DEF:
-      return "DEF";
-    }
-    return "OP";
-  };
-
   auto &a1 = inst->getArg1();
   auto &a2 = inst->getArg2();
   auto &res = inst->getResult();
@@ -456,33 +380,33 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   }
   case OpCode::GOTO: {
     if (isLabel(res)) {
-      out << "j " << labelName(res) << "\n";
+      out << "  j " << labelName(res) << "\n";
     }
     break;
   }
   case OpCode::IF: {
     std::string rcond = ensureInReg(a1, out);
-    out << "bne " << rcond << ", $zero, " << labelName(res) << "\n";
+    out << "  bne " << rcond << ", $zero, " << labelName(res) << "\n";
     break;
   }
   case OpCode::ASSIGN: {
     if (isTemp(res)) {
       std::string dst = regForTemp(res.asInt());
       if (isConst(a1)) {
-        out << "li " << dst << ", " << a1.asInt() << "\n";
+        out << "  li " << dst << ", " << a1.asInt() << "\n";
       } else {
         std::string rsrc = ensureInReg(a1, out);
-        out << "move " << dst << ", " << rsrc << "\n";
+        out << "  move " << dst << ", " << rsrc << "\n";
       }
     } else if (isVar(res)) {
       std::string rsrc = ensureInReg(a1, out);
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rsrc << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rsrc << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rsrc << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rsrc << ", 0($t7)\n";
       }
     }
     break;
@@ -492,26 +416,26 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::MUL:
   case OpCode::DIV:
   case OpCode::MOD: {
-  std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-  std::string rb = ensureInReg(a2, out, "$t7", "$t7");
+    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
+    std::string rb = ensureInReg(a2, out, "$t7", "$t7");
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     switch (op) {
     case OpCode::ADD:
-      out << "addu " << rd << ", " << ra << ", " << rb << "\n";
+      out << "  addu " << rd << ", " << ra << ", " << rb << "\n";
       break;
     case OpCode::SUB:
-      out << "subu " << rd << ", " << ra << ", " << rb << "\n";
+      out << "  subu " << rd << ", " << ra << ", " << rb << "\n";
       break;
     case OpCode::MUL:
-      out << "mul " << rd << ", " << ra << ", " << rb << "\n";
+      out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
       break;
     case OpCode::DIV:
-      out << "div " << ra << ", " << rb << "\n";
-      out << "mflo " << rd << "\n";
+      out << "  div " << ra << ", " << rb << "\n";
+      out << "  mflo " << rd << "\n";
       break;
     case OpCode::MOD:
-      out << "div " << ra << ", " << rb << "\n";
-      out << "mfhi " << rd << "\n";
+      out << "  div " << ra << ", " << rb << "\n";
+      out << "  mfhi " << rd << "\n";
       break;
     default:
       break;
@@ -520,10 +444,10 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -531,15 +455,15 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::NEG: {
     std::string ra = ensureInReg(a1, out);
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    out << "subu " << rd << ", $zero, " << ra << "\n";
+    out << "  subu " << rd << ", $zero, " << ra << "\n";
     if (isVar(res)) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -550,31 +474,31 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::LE:
   case OpCode::GT:
   case OpCode::GE: {
-  std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-  std::string rb = ensureInReg(a2, out, "$t7", "$t7");
+    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
+    std::string rb = ensureInReg(a2, out, "$t7", "$t7");
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     switch (op) {
     case OpCode::LT:
-      out << "slt " << rd << ", " << ra << ", " << rb << "\n";
+      out << "  slt " << rd << ", " << ra << ", " << rb << "\n";
       break;
     case OpCode::GT:
-      out << "slt " << rd << ", " << rb << ", " << ra << "\n";
+      out << "  slt " << rd << ", " << rb << ", " << ra << "\n";
       break;
     case OpCode::LE:
-      out << "slt $t6, " << rb << ", " << ra << "\n";
-      out << "xori " << rd << ", $t6, 1\n";
+      out << "  slt $t6, " << rb << ", " << ra << "\n";
+      out << "  xori " << rd << ", $t6, 1\n";
       break;
     case OpCode::GE:
-      out << "slt $t6, " << ra << ", " << rb << "\n";
-      out << "xori " << rd << ", $t6, 1\n";
+      out << "  slt $t6, " << ra << ", " << rb << "\n";
+      out << "  xori " << rd << ", $t6, 1\n";
       break;
     case OpCode::EQ:
-      out << "subu $t6, " << ra << ", " << rb << "\n";
-      out << "sltiu " << rd << ", $t6, 1\n";
+      out << "  subu $t6, " << ra << ", " << rb << "\n";
+      out << "  sltiu " << rd << ", $t6, 1\n";
       break;
     case OpCode::NEQ:
-      out << "subu $t6, " << ra << ", " << rb << "\n";
-      out << "sltu " << rd << ", $zero, $t6\n";
+      out << "  subu $t6, " << ra << ", " << rb << "\n";
+      out << "  sltu " << rd << ", $zero, $t6\n";
       break;
     default:
       break;
@@ -583,10 +507,10 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset
+        out << "  sw " << rd << ", " << lit->second.offset
             << "($fp)\n"; // store comparison result in local
       } else {
-        out << "la $t7, " << name << "\n";
+        out << "  la $t7, " << name << "\n";
         out << "sw " << rd << ", 0($t7)\n";
       }
     }
@@ -595,15 +519,15 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::NOT: {
     std::string ra = ensureInReg(a1, out);
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    out << "sltiu " << rd << ", " << ra << ", 1\n";
+    out << "  sltiu " << rd << ", " << ra << ", 1\n";
     if (isVar(res)) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -615,20 +539,20 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string ra1 = "$t6";
     std::string rb1 = "$t7";
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t5";
-    out << "sltu " << ra1 << ", $zero, " << ra << "\n";
-    out << "sltu " << rb1 << ", $zero, " << rb << "\n";
+    out << "  sltu " << ra1 << ", $zero, " << ra << "\n";
+    out << "  sltu " << rb1 << ", $zero, " << rb << "\n";
     if (op == OpCode::AND)
-      out << "and " << rd << ", " << ra1 << ", " << rb1 << "\n";
+      out << "  and " << rd << ", " << ra1 << ", " << rb1 << "\n";
     else
-      out << "or " << rd << ", " << ra1 << ", " << rb1 << "\n";
+      out << "  or " << rd << ", " << ra1 << ", " << rb1 << "\n";
     if (isVar(res)) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -639,41 +563,41 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     if (isVar(a1)) {
       auto sym = a1.asSymbol();
       std::string name = sym->name;
-      bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
+      bool isArray =
+          sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
         if (isArray) {
-          out << "addiu $t8, $fp, " << lit->second.offset << "\n"; // local array base
+          out << "  addiu $t8, $fp, " << lit->second.offset << "\n";
         } else {
-          out << "lw $t8, " << lit->second.offset << "($fp)\n"; // local scalar/pointer value
+          out << "  lw $t8, " << lit->second.offset << "($fp)\n";
         }
       } else {
         if (isArray) {
-          out << "la $t8, " << name << "\n"; // global array base
+          out << "  la $t8, " << name << "\n";
         } else {
-          out << "la $t8, " << name << "\n";
-          out << "lw $t8, 0($t8)\n"; // global scalar/pointer value
+          out << "  la $t8, " << name << "\n";
+          out << "  lw $t8, 0($t8)\n";
         }
       }
       if (isConst(a2)) {
         int off = a2.asInt() * 4;
-        out << "lw " << rd << ", " << off << "($t8)\n";
+        out << "  lw " << rd << ", " << off << "($t8)\n";
       } else {
-        // Use distinct scratch register for index to avoid clobbering $t8 base
         std::string ri = ensureInReg(a2, out, "$t9", "$t7");
-        out << "sll $t7, " << ri << ", 2\n";
-        out << "addu $t8, $t8, $t7\n";
-        out << "lw " << rd << ", 0($t8)\n";
+        out << "  sll $t7, " << ri << ", 2\n";
+        out << "  addu $t8, $t8, $t7\n";
+        out << "  lw " << rd << ", 0($t8)\n";
       }
     }
     if (isVar(res)) {
       auto name = res.asSymbol()->name;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
-        out << "sw " << rd << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -684,31 +608,32 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     if (isVar(a2)) {
       auto sym = a2.asSymbol();
       std::string name = sym->name;
-      bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
+      bool isArray =
+          sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(name);
       if (lit != locals_.end()) {
         if (isArray) {
-          out << "addiu $t8, $fp, " << lit->second.offset << "\n";
+          out << "  addiu $t8, $fp, " << lit->second.offset << "\n";
         } else {
-          out << "lw $t8, " << lit->second.offset << "($fp)\n";
+          out << "  lw $t8, " << lit->second.offset << "($fp)\n";
         }
       } else {
         if (isArray) {
-          out << "la $t8, " << name << "\n";
+          out << "  la $t8, " << name << "\n";
         } else {
-          out << "la $t8, " << name << "\n";
-          out << "lw $t8, 0($t8)\n";
+          out << "  la $t8, " << name << "\n";
+          out << "  lw $t8, 0($t8)\n";
         }
       }
     }
     auto &idxOp = res;
     if (isConst(idxOp)) {
-      out << "sw " << rv << ", " << (idxOp.asInt() * 4) << "($t8)\n";
+      out << "  sw " << rv << ", " << (idxOp.asInt() * 4) << "($t8)\n";
     } else {
       std::string ri = ensureInReg(idxOp, out, "$t9", "$t7");
-      out << "sll $t7, " << ri << ", 2\n";
-      out << "addu $t8, $t8, $t7\n";
-      out << "sw " << rv << ", 0($t8)\n";
+      out << "  sll $t7, " << ri << ", 2\n";
+      out << "  addu $t8, $t8, $t7\n";
+      out << "  sw " << rv << ", 0($t8)\n";
     }
     break;
   }
@@ -724,31 +649,27 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         bool isStr = curMod_ && curMod_->stringLiterals.find(name) !=
                                     curMod_->stringLiterals.end();
         if (isStr) {
-          out << "la " << aregs[idx] << ", " << name << "\n";
+          out << "  la " << aregs[idx] << ", " << name << "\n";
         } else {
-          // Check if this is an array (pass address) or scalar (pass value)
           auto sym = a1.asSymbol();
-          bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
-          
+          bool isArray =
+              sym && sym->type && sym->type->category == Type::Category::Array;
+
           if (locals_.find(name) == locals_.end()) {
-            // Global variable
-            out << "la " << aregs[idx] << ", " << name << "\n";
+            out << "  la " << aregs[idx] << ", " << name << "\n";
             if (!isArray) {
-              // Scalar global: load its value
-              out << "lw " << aregs[idx] << ", 0(" << aregs[idx] << ")\n";
+              out << "  lw " << aregs[idx] << ", 0(" << aregs[idx] << ")\n";
             }
-            // Array global: address already loaded, don't dereference
           } else {
-            // Local variable
             std::string r = ensureInReg(a1, out);
-            out << "move " << aregs[idx] << ", " << r << "\n";
+            out << "  move " << aregs[idx] << ", " << r << "\n";
           }
         }
       } else if (isConst(a1)) {
-        out << "li " << aregs[idx] << ", " << a1.asInt() << "\n";
+        out << "  li " << aregs[idx] << ", " << a1.asInt() << "\n";
       } else {
         std::string r = ensureInReg(a1, out);
-        out << "move " << aregs[idx] << ", " << r << "\n";
+        out << "  move " << aregs[idx] << ", " << r << "\n";
       }
     } else {
       pendingExtraArgs_.push_back(a1);
@@ -759,26 +680,26 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     if (!pendingExtraArgs_.empty()) {
       int n = static_cast<int>(pendingExtraArgs_.size());
       int total = 16 + n * 4;
-      out << "move $t1, $sp\n";
-      out << "addiu $sp, $sp, -" << total << "\n";
-      out << "addiu $t1, $t1, 16\n";
+      out << "  move $t1, $sp\n";
+      out << "  addiu $sp, $sp, -" << total << "\n";
+      out << "  addiu $t1, $t1, 16\n";
       for (int i = 0; i < n; ++i) {
         const Operand &arg = pendingExtraArgs_[static_cast<size_t>(i)];
         std::string r = ensureInReg(arg, out);
         int off = i * 4;
-        out << "sw " << r << ", " << off << "($t1)\n";
+        out << "  sw " << r << ", " << off << "($t1)\n";
       }
     }
     std::string fname = isVar(a2) ? a2.asSymbol()->name : std::string("func");
-    out << "jal " << fname << "\n";
+    out << "  jal " << fname << "\n";
     if (isTemp(res)) {
       std::string rd = regForTemp(res.asInt());
-      out << "move " << rd << ", $v0\n";
+      out << "  move " << rd << ", $v0\n";
     }
     if (!pendingExtraArgs_.empty()) {
       int n = static_cast<int>(pendingExtraArgs_.size());
       int bytes = 16 + n * 4;
-      out << "addiu $sp, $sp, " << bytes << "\n";
+      out << "  addiu $sp, $sp, " << bytes << "\n";
       pendingExtraArgs_.clear();
     }
     paramIndex_ = 0;
@@ -787,24 +708,21 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::RETURN: {
     if (res.getType() != OperandType::Empty) {
       if (isConst(res)) {
-        out << "li $v0, " << res.asInt() << "\n";
+        out << "  li $v0, " << res.asInt() << "\n";
       } else {
         std::string r = ensureInReg(res, out);
-        out << "move $v0, " << r << "\n";
+        out << "  move $v0, " << r << "\n";
       }
     }
-    // Jump to unified epilogue label to prevent fallthrough overwrites
     if (!currentEpilogueLabel_.empty()) {
-      out << "j " << currentEpilogueLabel_ << "\n";
+      out << "  j " << currentEpilogueLabel_ << "\n";
     }
     break;
   }
   case OpCode::DEF: {
-    // 已由 .data 处理
     break;
   }
   case OpCode::PRINTF: {
-    // 不会直接出现，printf 通过 PARAM/CALL 实现
     break;
   }
   }
@@ -822,28 +740,29 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
   case OperandType::Temporary:
     return regForTemp(op.asInt());
   case OperandType::ConstantInt:
-    out << "li " << immScratch << ", " << op.asInt() << "\n";
+    out << "  li " << immScratch << ", " << op.asInt() << "\n";
     return immScratch;
   case OperandType::Variable: {
     auto sym = op.asSymbol();
     std::string name = sym->name;
-    bool isArray = sym && sym->type && sym->type->category == Type::Category::Array;
+    bool isArray =
+        sym && sym->type && sym->type->category == Type::Category::Array;
     auto lit = locals_.find(name);
     if (lit != locals_.end()) {
       if (isArray) {
-        out << "addiu " << varScratch << ", $fp, " << lit->second.offset << "\n"; // local array address
+        out << "  addiu " << varScratch << ", $fp, " << lit->second.offset
+            << "\n";
       } else {
-        out << "lw " << varScratch << ", " << lit->second.offset << "($fp)\n"; // local scalar/pointer value
+        out << "  lw " << varScratch << ", " << lit->second.offset << "($fp)\n";
       }
       return varScratch;
     }
-    // Global variable
     if (isArray) {
-      out << "la " << varScratch << ", " << name << "\n"; // global array address
+      out << "  la " << varScratch << ", " << name << "\n";
       return varScratch;
     } else {
-      out << "la " << varScratch << ", " << name << "\n";
-      out << "lw " << varScratch << ", 0(" << varScratch << ")\n"; // global scalar/pointer value
+      out << "  la " << varScratch << ", " << name << "\n";
+      out << "  lw " << varScratch << ", 0(" << varScratch << ")\n";
       return varScratch;
     }
   }
@@ -958,8 +877,6 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
         }
         if (sym.getType() == OperandType::Variable) {
           std::string name = sym.asSymbol()->name;
-          // Local DEF shadows global even if same name; allocate if not
-          // already.
           if (locals_.find(name) == locals_.end()) {
             int words = sz > 0 ? sz : 1;
             locals_[name] = {nextOffset, words};
@@ -973,7 +890,7 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
     }
     isFirstBlock = false;
   }
-  // Align frame size up to 8 bytes
+  // align frame size to 8 bytes
   frameSize_ = nextOffset;
   int rem = frameSize_ % 8;
   if (rem != 0)
