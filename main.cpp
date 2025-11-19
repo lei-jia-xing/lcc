@@ -44,18 +44,14 @@ int main() {
     lcc::codegen::CodeGen cg;
     cg.generate(compUnit.get());
 
-    // Build IRModuleView for backend and emit assembly to mips.s
     lcc::backend::IRModuleView mod;
-    // Functions
     for (const auto &fp : cg.getFunctions()) {
       mod.functions.push_back(fp.get());
     }
-    // Globals: store pointers to instructions (valid while cg alive)
     const auto &globals = cg.getGlobalsIR();
     for (size_t i = 0; i < globals.size(); ++i) {
       mod.globals.push_back(&globals[i]);
     }
-    // String literals: map label -> literal text
     for (const auto &kv : cg.getStringLiteralSymbols()) {
       const std::string &literal = kv.first;
       const std::string &label = kv.second->name;

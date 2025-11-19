@@ -11,9 +11,9 @@ This project is currently under development. The progress of each major componen
   - [x] Parsing (Parser)
   - [x] Abstract Syntax Tree (AST) Generation
   - [x] Semantic Analysis
-  - [ ] Intermediate Representation (IR) Generation
+  - [x] Intermediate Representation (IR) Generation
 - **Backend**
-  - [ ] MIPS Assembly Generation
+  - [x] MIPS Assembly Generation (minimal, syscall-based shims for printf/getint)
 
 ## Language Grammar
 
@@ -64,6 +64,26 @@ To compile a source file, run:
 ```bash
 ./Compiler
 ```
+
+## Running EBNF tests
+
+This repo includes a small suite of source files that each exercise parts of the EBNF grammar under `tests/ebnf/`.
+
+To build and run them all at once and collect outputs per test case, use:
+
+```bash
+sh scripts/run_ebnf_tests.sh
+```
+
+What it does:
+- Ensures `build/Compiler` exists (configures and builds if needed)
+- For every `tests/ebnf/*.lcc`, copies it to `build/testfile.txt` and runs the compiler
+- Stores artifacts under `build/out/ebnf/<testname>/`: `ir.txt`, `mips.txt`, `mips.s`, `error.txt`, and the input `testfile.txt`
+- Prints a summary PASS/FAIL based on the compiler exit code and whether `error.txt` is empty
+
+Note:
+- The MIPS backend provides a minimal `printf` that supports only `%d` and up to 3 integer arguments; format strings may include literal characters (e.g., spaces, `\n`).
+- Logical operators (`&&`, `||`) are only valid inside conditions (e.g., `if (...)` or `for (...)`) as per the grammar; they are not part of `Exp`.
 
 ## License
 
