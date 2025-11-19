@@ -21,6 +21,15 @@ public:
 
   void reset();
 
+  const std::vector<std::shared_ptr<Function>> &getFunctions() const {
+    return functions_;
+  }
+  const std::vector<Instruction> &getGlobalsIR() const { return globalsIR_; }
+  const std::unordered_map<std::string, std::shared_ptr<Symbol>> &
+  getStringLiteralSymbols() const {
+    return stringLiterals_;
+  }
+
 private:
   void genFunction(FuncDef *funcDef);
   void genMainFuncDef(MainFuncDef *mainDef);
@@ -42,14 +51,13 @@ private:
   void genConstDecl(ConstDecl *decl);
   void genVarDecl(VarDecl *decl);
   void genConstDef(ConstDef *def);
-  void genVarDef(VarDef *def);
+  void genVarDef(VarDef *def, bool isStaticCtx);
   void genConstInitVal(ConstInitVal *init, const std::shared_ptr<Symbol> &sym);
   void genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym);
   Operand genConstExp(ConstExp *ce);
 
   Operand genExp(Exp *exp);
-  Operand genCond(Cond *cond);
-  void genCondBranch(Cond *cond, int tLbl, int fLbl);
+  void genCond(Cond *cond, int tLbl, int fLbl);
   Operand genLVal(LVal *lval, Operand *addrOut = nullptr);
   Operand genPrimary(PrimaryExp *pe);
   Operand genNumber(Number *num);
@@ -62,24 +70,28 @@ private:
   Operand genLOr(LOrExp *lo);
   std::vector<Operand> genFuncRParams(FuncRParams *params);
 
+  // Alias management for function-local resolution (avoids global pollution)
+  void pushAliasScope();
+  void popAliasScope();
+  std::shared_ptr<Symbol> resolveAliasOrNull(const std::string &name) const;
+  void setAlias(const std::string &name, const std::shared_ptr<Symbol> &sym);
+
   void emit(const Instruction &inst);
   void emitGlobal(const Instruction &inst);
   Operand newTemp();
   Operand newLabel();
   void placeLabel(const Operand &label);
   void output(const std::string &line);
-
-  // Try to evaluate an Exp as a constant integer; returns true if succeed.
-  bool tryEvalConst(class Exp *exp, int &outVal);
+  bool tryEvalExp(Exp *exp, int &outVal);
   bool tryEvalConst(class AddExp *ae, int &outVal);
   bool tryEvalConst(class MulExp *me, int &outVal);
   bool tryEvalConst(class UnaryExp *ue, int &outVal);
   bool tryEvalConst(class PrimaryExp *pe, int &outVal);
   bool tryEvalConst(class Number *num, int &outVal);
-
-  // General constant folding helpers for value-form ops
-  bool foldUnary(class Operand const &a, OpCode op, int &outVal);
-  bool foldBinary(class Operand const &a, class Operand const &b, OpCode op, int &outVal);
+  bool tryEvalConst(class RelExp *re, int &outVal);
+  bool tryEvalConst(class EqExp *ee, int &outVal);
+  bool tryEvalConst(class LAndExp *la, int &outVal);
+  bool tryEvalConst(class LOrExp *lo, int &outVal);
 
   std::shared_ptr<Symbol> internStringLiteral(const std::string &literal);
 
@@ -98,14 +110,17 @@ private:
   std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
   int nextStringId_ = 0;
   bool outputEnabled_ = true;
-  bool curDeclIsStatic_ = false; // transient while lowering a VarDecl
   std::unordered_set<std::string> definedGlobals_;
+  // Stack of alias maps for static locals per lexical scope
+  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>>
+      aliasStack_;
   struct LoopContext {
     int breakLabel;
     int continueLabel;
   };
   std::vector<LoopContext> loopStack_;
   std::vector<Instruction> globalsIR_;
+  std::vector<std::shared_ptr<Function>> functions_;
   void pushLoop(int breakLbl, int continueLbl) {
     loopStack_.push_back({breakLbl, continueLbl});
   }
