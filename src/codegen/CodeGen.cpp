@@ -438,11 +438,21 @@ void CodeGen::genStmt(Stmt *stmt) {
 void CodeGen::genAssign(AssignStmt *stmt) {
   if (!stmt)
     return;
-
-  Operand value = genExp(stmt->exp.get());
-  Operand var = genLVal(stmt->lval.get());
-
-  emit(Instruction::MakeAssign(value, var));
+  // Support scalar and array element assignments.
+  Operand addr; // if lval is array element, addr will hold index
+  Operand baseOrValue = genLVal(stmt->lval.get(), &addr);
+  Operand rhs = genExp(stmt->exp.get());
+  if (addr.getType() != OperandType::Empty) {
+    // Array element assignment: STORE rhs into base[index]
+    // genLVal returned loaded value into a temp; we need base symbol again.
+    // Re-resolve symbol (alias-aware) from original lval ident.
+    std::shared_ptr<Symbol> aliasSym = resolveAliasOrNull(stmt->lval->ident);
+    auto sym = aliasSym ? aliasSym : internSymbol(stmt->lval->ident);
+    emit(Instruction::MakeStore(rhs, Operand::Variable(sym), addr));
+  } else {
+    // Simple variable assignment
+    emit(Instruction::MakeAssign(rhs, baseOrValue));
+  }
 }
 void CodeGen::genExpStmt(ExpStmt *stmt) {
   if (!stmt)
@@ -615,7 +625,7 @@ void CodeGen::genVarDecl(VarDecl *decl) {
 void CodeGen::genConstDef(ConstDef *def) {
   if (!def)
     return;
-  auto sym = internSymbol(def->ident);
+  auto sym = internSymbol(def->ident, def->type); // Use type from AST
   Operand sizeOp = Operand::ConstantInt(1);
   if (def->arraySize) {
     sizeOp = genConstExp(def->arraySize.get());
@@ -639,7 +649,7 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
     std::string gname = std::string("_S_") +
                         (ctx_.func ? ctx_.func->getName() : "fn") + "_" +
                         def->ident;
-    auto gsym = internSymbol(gname);
+    auto gsym = internSymbol(gname, def->type);
     setAlias(def->ident, gsym);
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
@@ -668,7 +678,7 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   }
 
   // Normal (non-static or top-level) variable
-  auto sym = internSymbol(def->ident);
+  auto sym = internSymbol(def->ident, def->type);
   emit(Instruction::MakeDef(Operand::Variable(sym),
                             Operand::ConstantInt(sizeInt)));
   if (def->initVal) {

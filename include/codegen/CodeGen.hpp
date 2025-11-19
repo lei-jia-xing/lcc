@@ -112,8 +112,7 @@ private:
   bool outputEnabled_ = true;
   std::unordered_set<std::string> definedGlobals_;
   // Stack of alias maps for static locals per lexical scope
-  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>>
-      aliasStack_;
+  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>> aliasStack_;
   struct LoopContext {
     int breakLabel;
     int continueLabel;
