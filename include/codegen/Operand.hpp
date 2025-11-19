@@ -6,22 +6,16 @@
 #include <variant>
 namespace lcc::codegen {
 
-enum class OperandType {
-  Empty,       // 占位：指令缺省操作数
-  Variable,    // 变量或函数名 (引用Symbol)
-  Temporary,   // 临时变量 tN
-  ConstantInt, // 整型常量
-  Label        // 标签 LN
-};
+enum class OperandType { Empty, Variable, Temporary, ConstantInt, Label };
 
 class Operand {
 public:
-  Operand();                                            // Empty
-  explicit Operand(std::shared_ptr<Symbol> symbol);     // Variable
-  static Operand Temporary(int tempId);                 // tN
-  static Operand ConstantInt(int v);                    // 42
-  static Operand Label(int id);                         // L3
-  static Operand Variable(std::shared_ptr<Symbol> sym); // helper
+  Operand();
+  explicit Operand(std::shared_ptr<Symbol> symbol);
+  static Operand Temporary(int tempId);
+  static Operand ConstantInt(int v);
+  static Operand Label(int id);
+  static Operand Variable(std::shared_ptr<Symbol> sym);
 
   OperandType getType() const { return _type; }
   std::string toString() const;
