@@ -698,6 +698,8 @@ std::unique_ptr<UnaryExp> Parser::parseUnaryExp() {
     advance();
     auto newunaryExp = parseUnaryExp();
     unaryExp->unaryType = UnaryExp::UnaryType::UNARY_OP;
+    // attach operand
+    unaryExp->unaryExp = std::move(newunaryExp);
   } else if (current.type == TokenType::IDENFR) {
     if (lexer.peekToken(1).type == TokenType::LPARENT) {
       // UnaryExp -> Ident '(' [FuncRParams] ')'
