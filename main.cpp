@@ -1,17 +1,18 @@
+#include "backend/AsmGen.hpp"
+#include "codegen/CodeGen.hpp"
 #include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
 #include "semantic/SemanticAnalyzer.hpp"
 #include <fstream>
 #include <iostream>
-#include "codegen/CodeGen.hpp"
 
 int main() {
   std::ofstream errorfile("error.txt");
   std::streambuf *original_cerr = std::cerr.rdbuf();
   std::cerr.rdbuf(errorfile.rdbuf());
 
-  std::ofstream parserfile("mips.txt");
+  std::ofstream parserfile("ir.txt");
   std::streambuf *original_cout = std::cout.rdbuf();
   std::cout.rdbuf(parserfile.rdbuf());
 
@@ -42,9 +43,30 @@ int main() {
   if (compUnit) {
     lcc::codegen::CodeGen cg;
     cg.generate(compUnit.get());
+
+    // Build IRModuleView for backend and emit assembly to mips.s
+    lcc::backend::IRModuleView mod;
+    // Functions
+    for (const auto &fp : cg.getFunctions()) {
+      mod.functions.push_back(fp.get());
+    }
+    // Globals: store pointers to instructions (valid while cg alive)
+    const auto &globals = cg.getGlobalsIR();
+    for (size_t i = 0; i < globals.size(); ++i) {
+      mod.globals.push_back(&globals[i]);
+    }
+    // String literals: map label -> literal text
+    for (const auto &kv : cg.getStringLiteralSymbols()) {
+      const std::string &literal = kv.first;
+      const std::string &label = kv.second->name;
+      mod.stringLiterals[label] = literal;
+    }
+
+    std::ofstream asmout("mips.txt");
+    lcc::backend::AsmGen asmgen;
+    asmgen.generate(mod, asmout);
   }
 
- 
   std::cerr.rdbuf(original_cerr);
   std::cout.rdbuf(original_cout);
 
