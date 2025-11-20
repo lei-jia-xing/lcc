@@ -321,7 +321,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     out << "lw $t8, " << baseFromFp << "($fp)\n";
     out << "sw $t8, " << offLocal << "($fp)\n";
   }
-  currentEpilogueLabel_ = func->getName() + std::string("_END");
+  currentEpilogueLabel_ = func->getName() + "_END";
 
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
@@ -368,7 +368,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   };
 
   auto labelName = [&](const Operand &o) {
-    return curFuncName_ + std::string("_L") + std::to_string(o.asInt());
+    return curFuncName_ + "_L" + std::to_string(o.asInt());
   };
 
   switch (op) {

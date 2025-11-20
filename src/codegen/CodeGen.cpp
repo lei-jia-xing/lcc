@@ -646,13 +646,13 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   }
 
   if (isStaticCtx && ctx_.curBlk) {
-    std::string gname = std::string("_S_") +
-                        (ctx_.func ? ctx_.func->getName() : "fn") + "_" +
+    std::string gname = "_S_" +
+                        (ctx_.func ? ctx_.func->getName() : std::string("fn")) + "_" +
                         def->ident;
     auto gsym = internSymbol(gname, def->type);
     setAlias(def->ident, gsym);
-    if (!definedGlobals_.count(gname)) {
-      definedGlobals_.insert(gname);
+    // Use insert to check if element was newly inserted (more efficient than count + insert)
+    if (definedGlobals_.insert(gname).second) {
       emitGlobal(Instruction::MakeDef(Operand::Variable(gsym),
                                       Operand::ConstantInt(sizeInt)));
     }
