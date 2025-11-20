@@ -2,7 +2,7 @@
 
 using namespace lcc::codegen;
 
-Function::Function(std::string name) : _name(std::move(name)) {}
+Function::Function(const std::string& name) : _name(name) {}
 
 std::shared_ptr<BasicBlock> Function::createBlock() {
   auto blk = std::make_shared<BasicBlock>(_nextBlockId++);

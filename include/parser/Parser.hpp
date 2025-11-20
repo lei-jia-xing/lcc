@@ -57,7 +57,7 @@ public:
    * @param line report line number
    * @param errorType report error type
    */
-  void error(const int &line, const std::string errorType);
+  void error(const int &line, const std::string& errorType);
   /**
    * @brief a constructor of Parser
    *

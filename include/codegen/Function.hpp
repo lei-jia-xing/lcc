@@ -9,7 +9,7 @@ namespace lcc::codegen {
 
 class Function {
 public:
-    explicit Function(std::string name);
+    explicit Function(const std::string& name);
 
     std::shared_ptr<BasicBlock> createBlock();
     const std::vector<std::shared_ptr<BasicBlock>>& getBlocks() const;

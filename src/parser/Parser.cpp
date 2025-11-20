@@ -40,7 +40,7 @@ bool Parser::expect(const std::vector<TokenType> &types,
   }
 }
 
-void Parser::error(const int &line, const std::string errorType) {
+void Parser::error(const int &line, const std::string& errorType) {
   if (silentDepth == 0) {
     ErrorReporter::getInstance().addError(line, errorType);
   }

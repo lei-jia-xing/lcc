@@ -6,6 +6,7 @@
 #pragma once
 #include "Token.hpp"
 #include <unordered_map>
+#include <vector>
 class Lexer {
 private:
   /**
@@ -25,6 +26,11 @@ private:
    * @brief the output enabled flag
    */
   bool outputEnabled = false;
+
+  /**
+   * @brief token cache for lookahead optimization
+   */
+  std::vector<Token> tokenCache;
 
   /**
    * @brief reserve keyword in this EBNF
@@ -52,7 +58,7 @@ public:
    * @param line current line number
    * @param errorType errorType to show
    */
-  void error(const int &line, const std::string errorType);
+  void error(const int &line, const std::string& errorType);
   /**
    * @brief constructor for Lexer
    *
@@ -60,7 +66,7 @@ public:
    * @param pos current position in source
    * @param line current line number in source
    */
-  Lexer(std::string source, size_t pos = 0, int line = 1);
+  Lexer(const std::string& source, size_t pos = 0, int line = 1);
   /**
    * @brief a function to get next token and output, error logging
    *
@@ -88,4 +94,12 @@ public:
    * @return the n-th token
    */
   Token peekToken(int n);
+
+private:
+  /**
+   * @brief internal implementation of nextToken without caching
+   *
+   * @return next Token
+   */
+  Token nextTokenImpl();
 };

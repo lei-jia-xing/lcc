@@ -78,8 +78,8 @@ public:
    * @param value value of token(int for INTCON, string for STRCON), default to
    * monostate
    */
-  Token(TokenType type = TokenType::UNKNOWN, std::string lexeme = "",
-        int line = 1, std::variant<std::monostate, int, std::string> value = {})
+  Token(TokenType type = TokenType::UNKNOWN, const std::string& lexeme = "",
+        int line = 1, const std::variant<std::monostate, int, std::string>& value = {})
       : type(type), lexeme(lexeme), line(line), value(value) {}
   std::variant<std::monostate, int, std::string> getToken() const {
     return value;

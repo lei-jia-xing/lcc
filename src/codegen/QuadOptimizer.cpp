@@ -2,6 +2,7 @@
 #include "codegen/Instruction.hpp"
 #include <unordered_map>
 #include <optional>
+#include <algorithm>
 
 using namespace lcc::codegen;
 
@@ -131,21 +132,19 @@ bool LocalDCEPass::run(Function &fn) {
     }
 
     auto &insts = blk->getInstructions();
-    // 反向遍历，删除无用指令
-    for (int i = (int)insts.size() - 1; i >= 0; --i) {
-      auto &inst = insts[i];
+    // 使用 erase-remove 习语来高效删除元素
+    auto new_end = std::remove_if(insts.begin(), insts.end(), [&](const Instruction& inst) {
       // 仅删除产生临时结果且无副作用的指令
       if (!hasSideEffect(inst.getOp()) && inst.getResult().getType() == OperandType::Temporary) {
         int t = inst.getResult().asInt();
         if (useCount[t] == 0) {
-          // 删除该指令
-          insts.erase(insts.begin() + i);
           changed = true;
-          continue;
+          return true;  // 标记为需要删除
         }
       }
-      // 更新使用计数：如果是赋值到 tX 且我们删除/保留都需要正确传播，这里不做复杂传播，保留简单模型
-    }
+      return false;  // 保留该指令
+    });
+    insts.erase(new_end, insts.end());
   }
   return changed;
 }

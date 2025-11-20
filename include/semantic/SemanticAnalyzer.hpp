@@ -25,7 +25,7 @@ private:
 
   bool outputenabled = false;
 
-  void error(const int &line, const std::string errorType);
+  void error(const int &line, const std::string& errorType);
 
   void visit(Decl *node);
   void visit(ConstDecl *node);

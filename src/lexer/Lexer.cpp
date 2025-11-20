@@ -4,7 +4,7 @@
 #include <iostream>
 #include <string>
 
-Lexer::Lexer(std::string source, size_t pos, int line)
+Lexer::Lexer(const std::string& source, size_t pos, int line)
     : source(source), pos(pos), line(line) {}
 void Lexer::skipwhitespace() {
   while (pos < source.length() && (source[pos] == '\t' || source[pos] == '\r' ||
@@ -15,7 +15,7 @@ void Lexer::skipwhitespace() {
     pos++;
   }
 }
-void Lexer::error(const int &line, const std::string errorType) {
+void Lexer::error(const int &line, const std::string& errorType) {
   if (silentDepth == 0) {
     ErrorReporter::getInstance().addError(line, errorType);
   }
@@ -36,24 +36,33 @@ void Lexer::output(const std::string &type, const std::string &value) {
 }
 
 Token Lexer::peekToken(int n) {
-  size_t savedPos = pos;
-  int savedLine = line;
-
-  silentDepth++;
-  Token token;
-  for (int i = 0; i < n; i++) {
-    token = nextToken();
+  // Ensure we have enough tokens in cache
+  while (tokenCache.size() < static_cast<size_t>(n)) {
+    size_t savedPos = pos;
+    int savedLine = line;
+    silentDepth++;
+    Token token = nextTokenImpl();
+    silentDepth--;
+    pos = savedPos;
+    line = savedLine;
+    tokenCache.push_back(token);
   }
-
-  silentDepth--;
-
-  pos = savedPos;
-  line = savedLine;
-
-  return token;
+  
+  return tokenCache[n - 1];
 }
 
 Token Lexer::nextToken() {
+  // If we have cached tokens, return the first one
+  if (!tokenCache.empty()) {
+    Token result = tokenCache.front();
+    tokenCache.erase(tokenCache.begin());
+    return result;
+  }
+  
+  return nextTokenImpl();
+}
+
+Token Lexer::nextTokenImpl() {
   int index;
   skipwhitespace();
   if (pos >= source.length()) {

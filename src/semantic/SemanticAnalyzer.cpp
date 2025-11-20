@@ -8,7 +8,7 @@
 
 SemanticAnalyzer::SemanticAnalyzer() {}
 
-void SemanticAnalyzer::error(const int &line, const std::string errorType) {
+void SemanticAnalyzer::error(const int &line, const std::string& errorType) {
   ErrorReporter::getInstance().addError(line, errorType);
 }
 
