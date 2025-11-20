@@ -8,8 +8,6 @@ using namespace lcc::backend;
 using namespace lcc::codegen;
 
 AsmGen::AsmGen() {
-  // Reserve $t7, $t8, $t9 exclusively for assembler scratch usage to avoid
-  // clobbering temporary results. Map temporaries only to $t0 - $t6.
   static const char *tRegs[7] = {"$t0", "$t1", "$t2", "$t3",
                                  "$t4", "$t5", "$t6"};
   regs_.reserve(7);
@@ -233,7 +231,7 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   // $a1..$a3: first three integer args
   // $t6: base address of extra integer args (passed by caller)
   out << "  move $t4, $a0\n"; // t4 = fmt ptr
-  out << "  li   $t5, 0\n";   // t5 = arg index (0->a1,1->a2,2->a3, >=3 -> extra)
+  out << "  li   $t5, 0\n"; // t5 = arg index (0->a1,1->a2,2->a3, >=3 -> extra)
   out << "printf_loop:\n";
   out << "  lbu  $t0, 0($t4)\n";
   out << "  beq  $t0, $zero, printf_end\n";
@@ -256,14 +254,16 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "  syscall\n";
   out << "  j printf_loop\n";
   out << "printf_emit_int:\n";
-  out << "  # select arg by index in $t5 (0->$a1,1->$a2,2->$a3, >=3 from extra area)\n";
+  out << "  # select arg by index in $t5 (0->$a1,1->$a2,2->$a3, >=3 from extra "
+         "area)\n";
   out << "  beq  $t5, $zero, printf_use_a1\n";
   out << "  li   $t1, 1\n";
   out << "  beq  $t5, $t1,  printf_use_a2\n";
   out << "  li   $t1, 2\n";
   out << "  beq  $t5, $t1,  printf_use_a3\n";
-  out << "  # use extra args starting from index 3, loaded from [$t6 + (t5-3)*4]\n";
-  out << "  addiu $t1, $t5, -3\n";  // t1 = (argIndex - 3)
+  out << "  # use extra args starting from index 3, loaded from [$t6 + "
+         "(t5-3)*4]\n";
+  out << "  addiu $t1, $t5, -3\n"; // t1 = (argIndex - 3)
   out << "  sll  $t1, $t1, 2\n";   // t1 *= 4
   out << "  addu $t7, $t6, $t1\n"; // t7 = extra_base + offset
   out << "  lw   $a0, 0($t7)\n";   // a0 = extra arg value
@@ -673,7 +673,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       }
     }
 
-    // Place extra args on caller stack in a contiguous area and pass its base in $t6.
+    // Place extra args on caller stack in a contiguous area and pass its base
+    // in $t6.
     int extraCount = static_cast<int>(pendingExtraArgs_.size());
     if (extraCount > 0) {
       int extraBytes = extraCount * 4;
@@ -701,7 +702,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       pendingExtraArgs_.clear();
     }
 
-    // Restore ALL temporary registers after call (this clobbers any pre-move of $v0).
+    // Restore ALL temporary registers after call (this clobbers any pre-move of
+    // $v0).
     if (saveSize > 0) {
       for (size_t i = 0; i < regs_.size(); ++i) {
         out << "  lw " << regs_[i].name << ", " << (i * 4) << "($sp)\n";
@@ -755,11 +757,11 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
     out << "  li " << immScratch << ", " << op.asInt() << "\n";
     return immScratch;
   case OperandType::Variable: {
-  auto sym = op.asSymbol();
-  std::string name = sym->name;
-  bool isArray =
-    sym && sym->type && sym->type->category == Type::Category::Array;
-  auto lit = locals_.find(sym.get());
+    auto sym = op.asSymbol();
+    std::string name = sym->name;
+    bool isArray =
+        sym && sym->type && sym->type->category == Type::Category::Array;
+    auto lit = locals_.find(sym.get());
     if (lit != locals_.end()) {
       if (isArray) {
         out << "  addiu " << varScratch << ", $fp, " << lit->second.offset
