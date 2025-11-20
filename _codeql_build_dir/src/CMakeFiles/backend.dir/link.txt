@@ -1,2 +1,0 @@
-/usr/bin/ar qc libbackend.a CMakeFiles/backend.dir/backend/AsmGen.cpp.o
-/usr/bin/ranlib libbackend.a
