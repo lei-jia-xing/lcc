@@ -1,0 +1,2 @@
+# Empty dependencies file for semanticanalyzer.
+# This may be replaced when dependencies are built.
