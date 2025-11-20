@@ -77,6 +77,7 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
         std::string name = inst->getArg1().asSymbol()->name;
         int sz = (t2 == OperandType::ConstantInt) ? inst->getArg2().asInt()
                                                   : inst->getResult().asInt();
+        // fallback to size 1
         if (sz < 1)
           sz = 1;
         recordDef(name, sz);
@@ -134,6 +135,7 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       continue;
     switch (inst->getOp()) {
     case OpCode::ASSIGN: {
+      // ASSIGN src - dst
       const Operand &src = inst->getArg1();
       const Operand &dst = inst->getResult();
       if (src.getType() == OperandType::ConstantInt &&
@@ -227,8 +229,11 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
     emitFunction(func, out);
   }
   out << "printf:\n";
-  out << "  move $t4, $a0\n";
-  out << "  li   $t5, 0\n";
+  // $a0: format string
+  // $a1..$a3: first three integer args
+  // $t6: base address of extra integer args (passed by caller)
+  out << "  move $t4, $a0\n"; // t4 = fmt ptr
+  out << "  li   $t5, 0\n";   // t5 = arg index (0->a1,1->a2,2->a3, >=3 -> extra)
   out << "printf_loop:\n";
   out << "  lbu  $t0, 0($t4)\n";
   out << "  beq  $t0, $zero, printf_end\n";
@@ -251,17 +256,18 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "  syscall\n";
   out << "  j printf_loop\n";
   out << "printf_emit_int:\n";
-  out << "  # select arg by index in $t5 (0->$a1,1->$a2,2->$a3)\n";
+  out << "  # select arg by index in $t5 (0->$a1,1->$a2,2->$a3, >=3 from extra area)\n";
   out << "  beq  $t5, $zero, printf_use_a1\n";
   out << "  li   $t1, 1\n";
   out << "  beq  $t5, $t1,  printf_use_a2\n";
   out << "  li   $t1, 2\n";
   out << "  beq  $t5, $t1,  printf_use_a3\n";
-  out << "  # too many args: print '?'\n";
-  out << "  li   $a0, '?'\n";
-  out << "  li   $v0, 11\n";
-  out << "  syscall\n";
-  out << "  j printf_loop\n";
+  out << "  # use extra args starting from index 3, loaded from [$t6 + (t5-3)*4]\n";
+  out << "  addiu $t1, $t5, -3\n";  // t1 = (argIndex - 3)
+  out << "  sll  $t1, $t1, 2\n";   // t1 *= 4
+  out << "  addu $t7, $t6, $t1\n"; // t7 = extra_base + offset
+  out << "  lw   $a0, 0($t7)\n";   // a0 = extra arg value
+  out << "  j printf_print_int\n";
   out << "printf_use_a1:\n";
   out << "  move $a0, $a1\n";
   out << "  j printf_print_int\n";
@@ -291,35 +297,36 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   out << func->getName() << ":\n";
   if (frameSize_ < 8)
     frameSize_ = 8; // reserve at least slots for $ra(0) and $fp(4)
-  out << "addiu $sp,$sp,-" << frameSize_ << "\n";
-  out << "sw $ra,0($sp)\n";
-  out << "sw $fp,4($sp)\n";
-  out << "move $fp, $sp\n";
+  out << "  addiu $sp,$sp,-" << frameSize_ << "\n";
+  out << "  sw $ra,0($sp)\n";
+  out << "  sw $fp,4($sp)\n";
+  out << "  move $fp, $sp\n";
 
   static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
   size_t fsz = formalParamByIndex_.size();
   for (size_t i = 0; i < fsz && i < 4; ++i) {
-    const std::string &v = formalParamByIndex_[i];
-    if (v.empty())
+    const Symbol *sym = formalParamByIndex_[i];
+    if (!sym)
       continue;
-    auto it = locals_.find(v);
+    auto it = locals_.find(sym);
     if (it != locals_.end()) {
       int off = it->second.offset;
-      out << "sw " << aregs[i] << ", " << off << "($fp)\n";
+      out << "  sw " << aregs[i] << ", " << off << "($fp)\n";
     }
   }
   for (size_t i = 4; i < fsz; ++i) {
-    const std::string &v = formalParamByIndex_[i];
-    if (v.empty())
+    const Symbol *sym = formalParamByIndex_[i];
+    if (!sym)
       continue;
-    auto it = locals_.find(v);
+    auto it = locals_.find(sym);
     if (it == locals_.end())
       continue;
     int offLocal = it->second.offset;
     int offCaller = static_cast<int>((i - 4) * 4);
+    // Extra args are placed by caller at [caller_sp_entry + 16 + off]
     int baseFromFp = frameSize_ + 16 + offCaller;
-    out << "lw $t8, " << baseFromFp << "($fp)\n";
-    out << "sw $t8, " << offLocal << "($fp)\n";
+    out << "  lw $t8, " << baseFromFp << "($fp)\n";
+    out << "  sw $t8, " << offLocal << "($fp)\n";
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
@@ -400,12 +407,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       }
     } else if (isVar(res)) {
       std::string rsrc = ensureInReg(a1, out);
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rsrc << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rsrc << ", 0($t7)\n";
       }
     }
@@ -441,12 +448,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       break;
     }
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rd << ", 0($t7)\n";
       }
     }
@@ -457,12 +464,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     out << "  subu " << rd << ", $zero, " << ra << "\n";
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rd << ", 0($t7)\n";
       }
     }
@@ -504,14 +511,14 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       break;
     }
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset
             << "($fp)\n"; // store comparison result in local
       } else {
-        out << "  la $t7, " << name << "\n";
-        out << "sw " << rd << ", 0($t7)\n";
+        out << "  la $t7, " << sym->name << "\n";
+        out << "  sw " << rd << ", 0($t7)\n";
       }
     }
     break;
@@ -521,12 +528,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
     out << "  sltiu " << rd << ", " << ra << ", 1\n";
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rd << ", 0($t7)\n";
       }
     }
@@ -546,12 +553,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     else
       out << "  or " << rd << ", " << ra1 << ", " << rb1 << "\n";
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rd << ", 0($t7)\n";
       }
     }
@@ -565,7 +572,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       std::string name = sym->name;
       bool isArray =
           sym && sym->type && sym->type->category == Type::Category::Array;
-      auto lit = locals_.find(name);
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         if (isArray) {
           out << "  addiu $t8, $fp, " << lit->second.offset << "\n";
@@ -573,12 +580,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           out << "  lw $t8, " << lit->second.offset << "($fp)\n";
         }
       } else {
-        if (isArray) {
-          out << "  la $t8, " << name << "\n";
-        } else {
-          out << "  la $t8, " << name << "\n";
-          out << "  lw $t8, 0($t8)\n";
-        }
+        out << "  la $t8, " << name << "\n";
       }
       if (isConst(a2)) {
         int off = a2.asInt() * 4;
@@ -591,12 +593,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       }
     }
     if (isVar(res)) {
-      auto name = res.asSymbol()->name;
-      auto lit = locals_.find(name);
+      auto sym = res.asSymbol();
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << name << "\n";
+        out << "  la $t7, " << sym->name << "\n";
         out << "  sw " << rd << ", 0($t7)\n";
       }
     }
@@ -610,7 +612,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       std::string name = sym->name;
       bool isArray =
           sym && sym->type && sym->type->category == Type::Category::Array;
-      auto lit = locals_.find(name);
+      auto lit = locals_.find(sym.get());
       if (lit != locals_.end()) {
         if (isArray) {
           out << "  addiu $t8, $fp, " << lit->second.offset << "\n";
@@ -618,12 +620,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           out << "  lw $t8, " << lit->second.offset << "($fp)\n";
         }
       } else {
-        if (isArray) {
-          out << "  la $t8, " << name << "\n";
-        } else {
-          out << "  la $t8, " << name << "\n";
-          out << "  lw $t8, 0($t8)\n";
-        }
+        out << "  la $t8, " << name << "\n";
       }
     }
     auto &idxOp = res;
@@ -651,19 +648,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         if (isStr) {
           out << "  la " << aregs[idx] << ", " << name << "\n";
         } else {
-          auto sym = a1.asSymbol();
-          bool isArray =
-              sym && sym->type && sym->type->category == Type::Category::Array;
-
-          if (locals_.find(name) == locals_.end()) {
-            out << "  la " << aregs[idx] << ", " << name << "\n";
-            if (!isArray) {
-              out << "  lw " << aregs[idx] << ", 0(" << aregs[idx] << ")\n";
-            }
-          } else {
-            std::string r = ensureInReg(a1, out);
-            out << "  move " << aregs[idx] << ", " << r << "\n";
-          }
+          std::string r = ensureInReg(a1, out);
+          out << "  move " << aregs[idx] << ", " << r << "\n";
         }
       } else if (isConst(a1)) {
         out << "  li " << aregs[idx] << ", " << a1.asInt() << "\n";
@@ -677,31 +663,57 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::CALL: {
-    if (!pendingExtraArgs_.empty()) {
-      int n = static_cast<int>(pendingExtraArgs_.size());
-      int total = 16 + n * 4;
-      out << "  move $t1, $sp\n";
-      out << "  addiu $sp, $sp, -" << total << "\n";
-      out << "  addiu $t1, $t1, 16\n";
-      for (int i = 0; i < n; ++i) {
+    // Save ALL temporary registers ($t0-$t6) before call.
+    // This is inefficient but correct, as liveness is not tracked.
+    int saveSize = regs_.size() * 4;
+    if (saveSize > 0) {
+      out << "  addiu $sp, $sp, -" << saveSize << "\n";
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        out << "  sw " << regs_[i].name << ", " << (i * 4) << "($sp)\n";
+      }
+    }
+
+    // Place extra args on caller stack in a contiguous area and pass its base in $t6.
+    int extraCount = static_cast<int>(pendingExtraArgs_.size());
+    if (extraCount > 0) {
+      int extraBytes = extraCount * 4;
+      out << "  addiu $sp, $sp, -" << extraBytes << "\n";
+      // $t6 points to the first extra arg (highest address in this block)
+      out << "  addiu $t6, $sp, 0\n";
+      for (int i = 0; i < extraCount; ++i) {
         const Operand &arg = pendingExtraArgs_[static_cast<size_t>(i)];
         std::string r = ensureInReg(arg, out);
         int off = i * 4;
-        out << "  sw " << r << ", " << off << "($t1)\n";
+        out << "  sw " << r << ", " << off << "($t6)\n";
       }
+    } else {
+      // No extra args: set $t6 to 0 so printf can handle missing extras.
+      out << "  move $t6, $zero\n";
     }
+
     std::string fname = isVar(a2) ? a2.asSymbol()->name : std::string("func");
     out << "  jal " << fname << "\n";
+
+    // Pop extra args area after call
+    if (extraCount > 0) {
+      int extraBytes = extraCount * 4;
+      out << "  addiu $sp, $sp, " << extraBytes << "\n";
+      pendingExtraArgs_.clear();
+    }
+
+    // Restore ALL temporary registers after call (this clobbers any pre-move of $v0).
+    if (saveSize > 0) {
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        out << "  lw " << regs_[i].name << ", " << (i * 4) << "($sp)\n";
+      }
+      out << "  addiu $sp, $sp, " << saveSize << "\n";
+    }
+    // Now move return value into destination temp so it is not overwritten.
     if (isTemp(res)) {
       std::string rd = regForTemp(res.asInt());
       out << "  move " << rd << ", $v0\n";
     }
-    if (!pendingExtraArgs_.empty()) {
-      int n = static_cast<int>(pendingExtraArgs_.size());
-      int bytes = 16 + n * 4;
-      out << "  addiu $sp, $sp, " << bytes << "\n";
-      pendingExtraArgs_.clear();
-    }
+
     paramIndex_ = 0;
     break;
   }
@@ -743,11 +755,11 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
     out << "  li " << immScratch << ", " << op.asInt() << "\n";
     return immScratch;
   case OperandType::Variable: {
-    auto sym = op.asSymbol();
-    std::string name = sym->name;
-    bool isArray =
-        sym && sym->type && sym->type->category == Type::Category::Array;
-    auto lit = locals_.find(name);
+  auto sym = op.asSymbol();
+  std::string name = sym->name;
+  bool isArray =
+    sym && sym->type && sym->type->category == Type::Category::Array;
+  auto lit = locals_.find(sym.get());
     if (lit != locals_.end()) {
       if (isArray) {
         out << "  addiu " << varScratch << ", $fp, " << lit->second.offset
@@ -857,10 +869,10 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
           if (idx >= 0) {
             if (formalParamByIndex_.size() <= static_cast<size_t>(idx))
               formalParamByIndex_.resize(static_cast<size_t>(idx + 1));
-            std::string vname = res.asSymbol()->name;
-            formalParamByIndex_[static_cast<size_t>(idx)] = vname;
-            if (locals_.find(vname) == locals_.end()) {
-              locals_[vname] = {nextOffset, 1};
+            auto sym = res.asSymbol();
+            formalParamByIndex_[static_cast<size_t>(idx)] = sym.get();
+            if (locals_.find(sym.get()) == locals_.end()) {
+              locals_[sym.get()] = {nextOffset, 1};
               nextOffset += 4;
             }
           }
@@ -876,10 +888,10 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
           sz = inst.getResult().asInt();
         }
         if (sym.getType() == OperandType::Variable) {
-          std::string name = sym.asSymbol()->name;
-          if (locals_.find(name) == locals_.end()) {
+          auto sp = sym.asSymbol().get();
+          if (locals_.find(sp) == locals_.end()) {
             int words = sz > 0 ? sz : 1;
-            locals_[name] = {nextOffset, words};
+            locals_[sp] = {nextOffset, words};
             nextOffset += words * 4;
           }
         }

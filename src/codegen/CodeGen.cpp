@@ -13,8 +13,10 @@ void CodeGen::reset() {
   ctx_.curBlk.reset();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
+  constValues_.clear();
   symbols_.clear();
   stringLiterals_.clear();
+  globalTypes_.clear();
   nextStringId_ = 0;
   globalsIR_.clear();
   functions_.clear();
@@ -66,6 +68,13 @@ bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
   case PrimaryExp::PrimaryType::EXP:
     return tryEvalExp(pe->exp.get(), outVal);
   case PrimaryExp::PrimaryType::LVAL:
+    if (pe->lval) {
+      auto it = constValues_.find(pe->lval->ident);
+      if (it != constValues_.end()) {
+        outVal = it->second;
+        return true;
+      }
+    }
     return false;
   }
   return false;
@@ -307,6 +316,7 @@ void CodeGen::genFunction(FuncDef *funcDef) {
   ctx_.func = funcPtr.get();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
+  symbols_.clear();
 
   ctx_.curBlk = funcPtr->createBlock();
   // Clear alias stack for a fresh function scope
@@ -354,6 +364,7 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
   ctx_.func = funcPtr.get();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
+  symbols_.clear();
 
   ctx_.curBlk = funcPtr->createBlock();
   // Clear alias stack for main function
@@ -625,7 +636,16 @@ void CodeGen::genVarDecl(VarDecl *decl) {
 void CodeGen::genConstDef(ConstDef *def) {
   if (!def)
     return;
-  auto sym = internSymbol(def->ident, def->type); // Use type from AST
+  std::shared_ptr<Symbol> sym;
+  if (!ctx_.func) {
+    // global const: use interned Symbol and persist type
+    sym = internSymbol(def->ident, def->type);
+    globalTypes_[def->ident] = def->type;
+  } else {
+    // Function-local const: create a fresh Symbol and bind via alias
+    sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
+    setAlias(def->ident, sym);
+  }
   Operand sizeOp = Operand::ConstantInt(1);
   if (def->arraySize) {
     sizeOp = genConstExp(def->arraySize.get());
@@ -650,6 +670,8 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
                         (ctx_.func ? ctx_.func->getName() : "fn") + "_" +
                         def->ident;
     auto gsym = internSymbol(gname, def->type);
+    // Record type for generated static-global symbol
+    globalTypes_[gname] = def->type;
     setAlias(def->ident, gsym);
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
@@ -678,7 +700,16 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   }
 
   // Normal (non-static or top-level) variable
-  auto sym = internSymbol(def->ident, def->type);
+  std::shared_ptr<Symbol> sym;
+  if (!ctx_.func) {
+    // Global variable: use interned symbol and persist type
+    sym = internSymbol(def->ident, def->type);
+    globalTypes_[def->ident] = def->type;
+  } else {
+    // Function-local variable: fresh Symbol per declaration, bound in alias
+    sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
+    setAlias(def->ident, sym);
+  }
   emit(Instruction::MakeDef(Operand::Variable(sym),
                             Operand::ConstantInt(sizeInt)));
   if (def->initVal) {
@@ -693,6 +724,9 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
   Operand var = Operand::Variable(sym);
   if (!init->isArray) {
     Operand v = genConstExp(init->exp.get());
+    if (v.getType() == OperandType::ConstantInt) {
+      constValues_[sym->name] = v.asInt();
+    }
     emit(Instruction::MakeAssign(v, var));
     return;
   }
@@ -1157,11 +1191,11 @@ std::vector<Operand> CodeGen::genFuncRParams(FuncRParams *params) {
 std::shared_ptr<Symbol> CodeGen::internSymbol(const std::string &name,
                                               TypePtr type) {
   auto it = symbols_.find(name);
-  if (it != symbols_.end()) {
+  if (it != symbols_.end())
     return it->second;
-  }
 
-  auto sym = std::make_shared<Symbol>(name, type, 0);
+  auto sym =
+      std::make_shared<Symbol>(name, type, 0); // lineno is unnecessary here
   symbols_[name] = sym;
   return sym;
 }

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <semantic/Symbol.hpp>
 
 namespace lcc {
 namespace codegen {
@@ -71,12 +72,13 @@ private:
     int offset = -1; // 相对 $sp 的正偏移
     int size = 1;    // 以 word 为单位
   };
-  std::unordered_map<std::string, LocalInfo> locals_;
+  // Key locals by Symbol* instead of name to avoid shadowing conflicts.
+  std::unordered_map<const Symbol *, LocalInfo> locals_;
   int frameSize_ = 0; // 包含保存 $ra 的槽位（最小 4）
   /**
    * @brief param index -> formal parameter variable name mapping for current
    */
-  std::vector<std::string> formalParamByIndex_;
+  std::vector<const Symbol *> formalParamByIndex_;
   /**
    * @brief >=4th arguments pending to be stored to stack for current function
    */

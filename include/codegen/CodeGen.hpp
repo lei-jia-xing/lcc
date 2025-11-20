@@ -82,6 +82,7 @@ private:
   Operand newLabel();
   void placeLabel(const Operand &label);
   void output(const std::string &line);
+  // folding constant expressions
   bool tryEvalExp(Exp *exp, int &outVal);
   bool tryEvalConst(class AddExp *ae, int &outVal);
   bool tryEvalConst(class MulExp *me, int &outVal);
@@ -93,40 +94,121 @@ private:
   bool tryEvalConst(class LAndExp *la, int &outVal);
   bool tryEvalConst(class LOrExp *lo, int &outVal);
 
+  /**
+   * @brief record the string literal
+   *
+   * @param literal the string literal content
+   */
   std::shared_ptr<Symbol> internStringLiteral(const std::string &literal);
 
+  /**
+   * @brief intern a symbol with the given name and type
+   *
+   * @param name the symbol name
+   * @param type the symbol type
+   */
   std::shared_ptr<Symbol> internSymbol(const std::string &name,
                                        TypePtr type = nullptr);
 
 private:
+  /**
+   * @class Context
+   * @brief a structure to hold the current code generation context
+   *
+   */
   struct Context {
+    /**
+     * @brief current function being generated
+     */
     Function *func = nullptr;
+    /**
+     * @brief current basic block being generated
+     */
     std::shared_ptr<BasicBlock> curBlk;
+    /**
+     * @brief the next temporary variable ID to use
+     */
     int nextTempId = 0;
+    /**
+     * @brief the next label ID to use
+     */
     int nextLabelId = 0;
   } ctx_;
 
+  /**
+   * @brief record of constant values for variables known at compile time, e.g.
+   * const int maxn = 1000
+   */
+  std::unordered_map<std::string, int> constValues_;
+  /**
+   * @brief the symbol table for the current function being generated
+   */
   std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
+  /**
+   * @brief all string literal symbols
+   */
   std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
+  /**
+   * @brief all global variable types (for use in data segment generation)
+   */
+  std::unordered_map<std::string, TypePtr> globalTypes_;
+  /**
+   * @brief the next string literal ID to use
+   */
   int nextStringId_ = 0;
+  /**
+   * @brief simple ir output control flag
+   */
   bool outputEnabled_ = true;
+  /**
+   * @brief record of defined global variables to avoid duplicate definitions
+   */
   std::unordered_set<std::string> definedGlobals_;
-  // Stack of alias maps for static locals per lexical scope
-  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>> aliasStack_;
+  /**
+   * @brief record of alias scopes for function-local name resolution
+   */
+  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>>
+      aliasStack_;
+  /**
+   * @class LoopContext
+   * @brief current loop context for break/continue statement resolution
+   *
+   */
   struct LoopContext {
     int breakLabel;
     int continueLabel;
   };
+  /**
+   * @brief stack of loop contexts for break/continue statement resolution
+   */
   std::vector<LoopContext> loopStack_;
+  /**
+   * @brief global IR instructions (for global variable definitions)
+   */
   std::vector<Instruction> globalsIR_;
   std::vector<std::shared_ptr<Function>> functions_;
+  /**
+   * @brief push current loop context onto the loop stack(where break/continue
+   * jump to)
+   *
+   * @param breakLbl the label to jump to on break
+   * @param continueLbl the label to jump to on continue
+   */
   void pushLoop(int breakLbl, int continueLbl) {
     loopStack_.push_back({breakLbl, continueLbl});
   }
+  /**
+   * @brief pop current loop context from the loop stack(when quiting a loop)
+   */
   void popLoop() {
     if (!loopStack_.empty())
       loopStack_.pop_back();
   }
+  /**
+   * @brief get current loop context
+   *
+   * @return nullptr if not in a loop,otherwise the current LoopContext pointer
+   */
   LoopContext *currentLoop() {
     return loopStack_.empty() ? nullptr : &loopStack_.back();
   }
