@@ -6,28 +6,29 @@
 namespace lcc::codegen {
 
 enum class OpCode {
-  ADD,
-  SUB,
-  MUL,
-  DIV,
-  MOD,
-  NEG,
+  ADD, // ADD arg1, arg2, res
+  SUB, // SUB arg1, arg2, res
+  MUL, // MUL arg1, arg2, res
+  DIV, // DIV arg1, arg2, res
+  MOD, // MOD arg1, arg2, res
+  NEG, // NEG arg1, res
 
-  EQ,
-  NEQ,
-  LT,
-  LE,
-  GT,
-  GE,
+  EQ,  // EQ arg1, arg2, res(0/1)
+  NEQ, // NEQ arg1, arg2, res(0/1)
+  LT,  // LT arg1, arg2, res(0/1)
+  LE,  // LE arg1, arg2, res(0/1)
+  GT,  // GT arg1, arg2, res(0/1)
+  GE,  // GE arg1, arg2, res(0/1)
 
-  AND,
-  OR,
-  NOT,
+  AND, // AND arg1, arg2, res(0/1)
+  OR,  // OR arg1, arg2, res(0/1)
+  NOT, // NOT arg1, res(0/1)
 
-  ASSIGN,
+  ASSIGN, // ASSIGN arg1 res
 
   LOAD,  // t = base[index]
-  STORE, // base[index] = value  (result 可为空)
+  STORE, // base[index] = value
+         // (EBNF文法只出现在赋值语句中，而不是作为赋值表达式)
 
   IF, // IF cond GOTO label
   GOTO,
