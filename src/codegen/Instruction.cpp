@@ -67,10 +67,8 @@ static const char *opToStr(OpCode op) {
     return "CALL";
   case OpCode::RETURN:
     return "RETURN";
-  case OpCode::PRINTF:
-    return "PRINTF";
-  case OpCode::DEF:
-    return "DEF";
+  case OpCode::ALLOCA:
+    return "ALLOCA";
   }
   return "OP";
 }
@@ -116,8 +114,7 @@ Instruction Instruction::MakeLoad(const Operand &base, const Operand &index,
 }
 Instruction Instruction::MakeStore(const Operand &value, const Operand &base,
                                    const Operand &index) {
-  return Instruction(OpCode::STORE, value, base,
-                     index); // result=index? 保持第三位置为索引，结果空
+  return Instruction(OpCode::STORE, value, base, index);
 }
 Instruction Instruction::MakeIf(const Operand &cond, const Operand &label) {
   return Instruction(OpCode::IF, cond, label);
@@ -136,5 +133,5 @@ Instruction Instruction::MakeReturn(const Operand &value) {
   return Instruction(OpCode::RETURN, value);
 }
 Instruction Instruction::MakeDef(const Operand &symbol, const Operand &size) {
-  return Instruction(OpCode::DEF, symbol, size);
+  return Instruction(OpCode::ALLOCA, symbol, size);
 }

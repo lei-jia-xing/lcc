@@ -1,11 +1,10 @@
 #pragma once
 
 #include <ostream>
+#include <semantic/Symbol.hpp>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
-#include <semantic/Symbol.hpp>
 
 namespace lcc {
 namespace codegen {
@@ -36,22 +35,27 @@ public:
   void generate(const IRModuleView &mod, std::ostream &out);
 
 private:
-  void emitHeader(std::ostream &out);
   void emitDataSection(const IRModuleView &mod, std::ostream &out);
   void emitTextSection(const IRModuleView &mod, std::ostream &out);
   void emitFunction(const codegen::Function *func, std::ostream &out);
 
+  /**
+   * @brief tranfer a instruction to assembly instructions
+   *
+   * @param inst instruction to be lowered
+   * @param output stream
+   */
   void lowerInstruction(const codegen::Instruction *inst, std::ostream &out);
 
+  /**
+   * @brief allocate a register for a temporary variable
+   *
+   * @param tempId the temporary variable id
+   */
   std::string regForTemp(int tempId) const;
   std::string ensureInReg(const codegen::Operand &op, std::ostream &out,
                           const char *immScratch = "$t9",
                           const char *varScratch = "$t8");
-
-  int acquireTempRegister(int tempId);
-  void releaseTempRegister(int tempId);
-  const RegDesc &reg(int idx) const { return regs_[idx]; }
-  RegDesc &reg(int idx) { return regs_[idx]; }
 
   void comment(std::ostream &out, const std::string &txt);
 
@@ -66,8 +70,6 @@ private:
   const IRModuleView *curMod_ = nullptr;
   std::string curFuncName_;
 
-  std::unordered_set<std::string> globals_;
-  std::unordered_map<std::string, int> globalSizes_;
   struct LocalInfo {
     int offset = -1; // 相对 $sp 的正偏移
     int size = 1;    // 以 word 为单位

@@ -11,7 +11,7 @@ enum class OpCode {
   MUL, // MUL arg1, arg2, res
   DIV, // DIV arg1, arg2, res
   MOD, // MOD arg1, arg2, res
-  NEG, // NEG arg1, res
+  NEG, // NEG arg1, res -
 
   EQ,  // EQ arg1, arg2, res(0/1)
   NEQ, // NEQ arg1, arg2, res(0/1)
@@ -22,25 +22,23 @@ enum class OpCode {
 
   AND, // AND arg1, arg2, res(0/1)
   OR,  // OR arg1, arg2, res(0/1)
-  NOT, // NOT arg1, res(0/1)
+  NOT, // NOT arg1 - res(0/1)
 
-  ASSIGN, // ASSIGN arg1 res
+  ASSIGN, // ASSIGN arg1 - res
 
-  LOAD,  // t = base[index]
-  STORE, // base[index] = value
+  LOAD,  // LOAD base, index, dst
+  STORE, // STORE value, base, index
          // (EBNF文法只出现在赋值语句中，而不是作为赋值表达式)
 
-  IF, // IF cond GOTO label
-  GOTO,
-  LABEL,
+  IF,    // IF cond - res(label)
+  GOTO,  // GOTO label - -
+  LABEL, // label - - res(label)
 
-  PARAM,
-  CALL, // ret = CALL func
-  RETURN,
+  PARAM,  // PARAM arg1 - -
+  CALL,   // CALL argCount func res
+  RETURN, // RETURN - - res
 
-  PRINTF,
-
-  DEF
+  ALLOCA // ALLOCA arg1 - size
 };
 
 class Instruction {

@@ -8,6 +8,8 @@ using namespace lcc::backend;
 using namespace lcc::codegen;
 
 AsmGen::AsmGen() {
+  // allocate $t0 ~ $t6 for temporary variables, and reserve $t7,$t8,$t9 as
+  // scratch registers
   static const char *tRegs[7] = {"$t0", "$t1", "$t2", "$t3",
                                  "$t4", "$t5", "$t6"};
   regs_.reserve(7);
@@ -57,32 +59,27 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
   };
   auto setVal = [&](const std::string &name, int idx, int val) {
     auto it = gmap.find(name);
-    if (it != gmap.end() && idx >= 0 && idx < (int)it->second.inits.size()) {
+    if (it != gmap.end() && idx >= 0 && idx < it->second.inits.size()) {
       it->second.inits[idx] = val;
     }
   };
   for (size_t i = 0; i < mod.globals.size(); ++i) {
     const Instruction *inst = mod.globals[i];
-    if (!inst)
-      continue;
     switch (inst->getOp()) {
-    case OpCode::DEF: {
+    case OpCode::ALLOCA: {
+      // ALLOCA arg1 - result
       auto t1 = inst->getArg1().getType();
-      auto t2 = inst->getArg2().getType();
       auto tr = inst->getResult().getType();
-      if (t1 == OperandType::Variable &&
-          (t2 == OperandType::ConstantInt || tr == OperandType::ConstantInt)) {
+      if (t1 == OperandType::Variable && tr == OperandType::ConstantInt) {
         std::string name = inst->getArg1().asSymbol()->name;
-        int sz = (t2 == OperandType::ConstantInt) ? inst->getArg2().asInt()
+        int sz = (t1 == OperandType::ConstantInt) ? inst->getArg2().asInt()
                                                   : inst->getResult().asInt();
-        // fallback to size 1
-        if (sz < 1)
-          sz = 1;
         recordDef(name, sz);
       }
       break;
     }
     case OpCode::ASSIGN: {
+      // ASSIGNE src -  dst
       const Operand &src = inst->getArg1();
       const Operand &dst = inst->getResult();
       if (src.getType() == OperandType::ConstantInt &&
@@ -93,14 +90,15 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       break;
     }
     case OpCode::STORE: {
+      // STORE base index, value
       const Operand &val = inst->getArg1();
       const Operand &base = inst->getArg2();
-      const Operand &idxOp = inst->getResult();
+      const Operand &idx = inst->getResult();
       if (val.getType() == OperandType::ConstantInt &&
           base.getType() == OperandType::Variable &&
-          idxOp.getType() == OperandType::ConstantInt) {
+          idx.getType() == OperandType::ConstantInt) {
         std::string name = base.asSymbol()->name;
-        setVal(name, idxOp.asInt(), val.asInt());
+        setVal(name, idx.asInt(), val.asInt());
       }
       break;
     }
@@ -109,8 +107,12 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
     }
   }
   std::unordered_map<int, int> tempValues;
+  /**
+   * @brief record scalar global variable values
+   */
   std::unordered_map<std::string, int> scalarValues;
   for (auto &kvInit : gmap) {
+    // first pop out and defined
     if (kvInit.second.defined && kvInit.second.size == 1) {
       scalarValues[kvInit.first] = kvInit.second.inits[0];
     }
@@ -129,8 +131,6 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
   };
   for (size_t i = 0; i < mod.globals.size(); ++i) {
     const Instruction *inst = mod.globals[i];
-    if (!inst)
-      continue;
     switch (inst->getOp()) {
     case OpCode::ASSIGN: {
       // ASSIGN src - dst
@@ -150,7 +150,7 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
       break;
     }
     case OpCode::LOAD: {
-      // LOAD base, idx, dstTemp
+      // LOAD base, idx, dst
       const Operand &base = inst->getArg1();
       const Operand &idxOp = inst->getArg2();
       const Operand &dst = inst->getResult();
@@ -220,8 +220,6 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   if (mainFunc)
     emitFunction(mainFunc, out);
   for (auto *func : mod.functions) {
-    if (!func)
-      continue;
     if (mainFunc && func->getName() == std::string("main"))
       continue;
     emitFunction(func, out);
@@ -298,16 +296,14 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   if (frameSize_ < 8)
     frameSize_ = 8; // reserve at least slots for $ra(0) and $fp(4)
   out << "  addiu $sp,$sp,-" << frameSize_ << "\n";
-  out << "  sw $ra,0($sp)\n";
-  out << "  sw $fp,4($sp)\n";
+  out << "  sw $ra, " << (frameSize_ - 4) << "($sp)\n";
+  out << "  sw $fp, " << (frameSize_ - 8) << "($sp)\n";
   out << "  move $fp, $sp\n";
 
   static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
   size_t fsz = formalParamByIndex_.size();
   for (size_t i = 0; i < fsz && i < 4; ++i) {
     const Symbol *sym = formalParamByIndex_[i];
-    if (!sym)
-      continue;
     auto it = locals_.find(sym);
     if (it != locals_.end()) {
       int off = it->second.offset;
@@ -322,10 +318,8 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     if (it == locals_.end())
       continue;
     int offLocal = it->second.offset;
-    int offCaller = static_cast<int>((i - 4) * 4);
-    // Extra args are placed by caller at [caller_sp_entry + 16 + off]
-    int baseFromFp = frameSize_ + 16 + offCaller;
-    out << "  lw $t8, " << baseFromFp << "($fp)\n";
+    int offCaller = 8 + (i - 4) * 4;
+    out << "  lw $t8, " << offCaller << "($fp)\n";
     out << "  sw $t8, " << offLocal << "($fp)\n";
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
@@ -336,18 +330,13 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     }
   }
   out << currentEpilogueLabel_ << ":\n";
+  out << "  lw $ra, " << (frameSize_ - 4) << "($sp)\n";
+  out << "  lw $fp, " << (frameSize_ - 8) << "($sp)\n";
+  out << "  addiu $sp, $sp, " << frameSize_ << "\n";
   if (func->getName() == "main") {
-    out << "  move $sp, $fp\n";
-    out << "  lw $fp,4($sp)\n";
-    out << "  lw $ra,0($sp)\n";
-    out << "  addiu $sp,$sp," << frameSize_ << "\n";
     out << "  li $v0, 10\n";
     out << "  syscall\n";
   } else {
-    out << "  move $sp, $fp\n";
-    out << "  lw $fp,4($sp)\n";
-    out << "  lw $ra,0($sp)\n";
-    out << "  addiu $sp,$sp," << frameSize_ << "\n";
     out << "  jr $ra\n";
   }
   out << "\n";
@@ -675,7 +664,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
 
     // Place extra args on caller stack in a contiguous area and pass its base
     // in $t6.
-    int extraCount = static_cast<int>(pendingExtraArgs_.size());
+    int extraCount = pendingExtraArgs_.size();
     if (extraCount > 0) {
       int extraBytes = extraCount * 4;
       out << "  addiu $sp, $sp, -" << extraBytes << "\n";
@@ -733,17 +722,14 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
     break;
   }
-  case OpCode::DEF: {
-    break;
-  }
-  case OpCode::PRINTF: {
+  case OpCode::ALLOCA: {
     break;
   }
   }
 }
 
 std::string AsmGen::regForTemp(int tempId) const {
-  int idx = (tempId % static_cast<int>(regs_.size()));
+  int idx = (tempId % regs_.size());
   return regs_[idx].name;
 }
 
@@ -771,6 +757,7 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
       }
       return varScratch;
     }
+    // global variable
     if (isArray) {
       out << "  la " << varScratch << ", " << name << "\n";
       return varScratch;
@@ -789,27 +776,6 @@ std::string AsmGen::ensureInReg(const Operand &op, std::ostream &out,
   return "$zero";
 }
 
-int AsmGen::acquireTempRegister(int tempId) {
-  for (size_t i = 0; i < regs_.size(); ++i) {
-    if (!regs_[i].inUse) {
-      regs_[i].inUse = true;
-      regs_[i].tempId = tempId;
-      return static_cast<int>(i);
-    }
-  }
-  return -1;
-}
-
-void AsmGen::releaseTempRegister(int tempId) {
-  for (auto &r : regs_) {
-    if (r.inUse && r.tempId == tempId) {
-      r.inUse = false;
-      r.tempId = -1;
-      return;
-    }
-  }
-}
-
 void AsmGen::comment(std::ostream &out, const std::string &txt) {
   if (emitComments_) {
     out << "# " << txt << "\n";
@@ -817,25 +783,16 @@ void AsmGen::comment(std::ostream &out, const std::string &txt) {
 }
 
 void AsmGen::analyzeGlobals(const IRModuleView &mod) {
-  globals_.clear();
-  globalSizes_.clear();
   for (auto *inst : mod.globals) {
-    if (!inst)
-      continue;
-    if (inst->getOp() == OpCode::DEF) {
+    if (inst->getOp() == OpCode::ALLOCA) {
+      // DEF a1 - res
       const auto &a1 = inst->getArg1();
       if (a1.getType() == OperandType::Variable) {
         std::string name = a1.asSymbol()->name;
-        globals_.insert(name);
         int sz = 1;
-        if (inst->getArg2().getType() == OperandType::ConstantInt) {
-          sz = inst->getArg2().asInt();
-        } else if (inst->getResult().getType() == OperandType::ConstantInt) {
+        if (inst->getResult().getType() == OperandType::ConstantInt) {
           sz = inst->getResult().asInt();
         }
-        if (sz < 1)
-          sz = 1;
-        globalSizes_[name] = sz;
       }
     }
   }
@@ -863,16 +820,17 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
         continue;
       }
       if (isFirstBlock && op == OpCode::PARAM) {
+        // PARAM arg1
         const auto &a1 = inst.getArg1();
         const auto &res = inst.getResult();
         if (inEntryParamRun && a1.getType() == OperandType::ConstantInt &&
             res.getType() == OperandType::Variable) {
           int idx = a1.asInt();
           if (idx >= 0) {
-            if (formalParamByIndex_.size() <= static_cast<size_t>(idx))
-              formalParamByIndex_.resize(static_cast<size_t>(idx + 1));
+            if (formalParamByIndex_.size() <= idx)
+              formalParamByIndex_.resize(idx + 1);
             auto sym = res.asSymbol();
-            formalParamByIndex_[static_cast<size_t>(idx)] = sym.get();
+            formalParamByIndex_[idx] = sym.get();
             if (locals_.find(sym.get()) == locals_.end()) {
               locals_[sym.get()] = {nextOffset, 1};
               nextOffset += 4;
@@ -881,12 +839,11 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
           continue;
         }
       }
-      if (op == OpCode::DEF) {
+      if (op == OpCode::ALLOCA) {
+        // DEF arg1 - result
         const auto &sym = inst.getArg1();
         int sz = 1;
-        if (inst.getArg2().getType() == OperandType::ConstantInt) {
-          sz = inst.getArg2().asInt();
-        } else if (inst.getResult().getType() == OperandType::ConstantInt) {
+        if (inst.getResult().getType() == OperandType::ConstantInt) {
           sz = inst.getResult().asInt();
         }
         if (sym.getType() == OperandType::Variable) {

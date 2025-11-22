@@ -73,7 +73,7 @@ private:
   // Alias management for function-local resolution (avoids global pollution)
   void pushAliasScope();
   void popAliasScope();
-  std::shared_ptr<Symbol> resolveAliasOrNull(const std::string &name) const;
+  std::shared_ptr<Symbol> resolveAlias(const std::string &name) const;
   void setAlias(const std::string &name, const std::shared_ptr<Symbol> &sym);
 
   void emit(const Instruction &inst);
@@ -93,6 +93,12 @@ private:
   bool tryEvalConst(class EqExp *ee, int &outVal);
   bool tryEvalConst(class LAndExp *la, int &outVal);
   bool tryEvalConst(class LOrExp *lo, int &outVal);
+
+  // short-circuit evaluation helper functions
+  void branchLAndForCond(class LAndExp *node, int trueLbl, int falseLbl);
+  void branchLOrForCond(class LOrExp *node, int trueLbl, int falseLbl);
+  void branchLAndForVal(class LAndExp *node, int trueLbl, int falseLbl);
+  void branchLOrForVal(class LOrExp *node, int trueLbl, int falseLbl);
 
   /**
    * @brief record the string literal
@@ -148,10 +154,6 @@ private:
    * @brief all string literal symbols
    */
   std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
-  /**
-   * @brief all global variable types (for use in data segment generation)
-   */
-  std::unordered_map<std::string, TypePtr> globalTypes_;
   /**
    * @brief the next string literal ID to use
    */
