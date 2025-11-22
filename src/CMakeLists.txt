@@ -1,22 +1,22 @@
-add_library(lexer lexer/Lexer.cpp)
-add_library(parser parser/Parser.cpp)
-add_library(semanticanalyzer semantic/SemanticAnalyzer.cpp)
-add_library(errorReporter errorReporter/ErrorReporter.cpp)
-add_library(codegen
+add_library(Lexer lexer/Lexer.cpp)
+add_library(Parser parser/Parser.cpp)
+add_library(Semanticanalyzer semantic/SemanticAnalyzer.cpp)
+add_library(ErrorReporter errorReporter/ErrorReporter.cpp)
+add_library(Codegen
     codegen/CodeGen.cpp
-    codegen/QuadOptimizer.cpp
+    # codegen/QuadOptimizer.cpp
     codegen/Function.cpp
     codegen/BasicBlock.cpp
     codegen/Instruction.cpp
     codegen/Operand.cpp)
 
-add_library(backend
+add_library(Backend
     backend/AsmGen.cpp)
 
-target_include_directories(backend PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(Backend PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
-target_include_directories(lexer PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(parser PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(semanticanalyzer PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(errorReporter PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(codegen PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(Lexer PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(Parser PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(Semanticanalyzer PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(ErrorReporter PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(Codegen PUBLIC ${CMAKE_SOURCE_DIR}/include)
