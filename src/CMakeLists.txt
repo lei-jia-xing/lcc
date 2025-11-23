@@ -11,7 +11,8 @@ add_library(Codegen
     codegen/Operand.cpp)
 
 add_library(Backend
-    backend/AsmGen.cpp)
+    backend/AsmGen.cpp
+    backend/RegisterAllocator.cpp)
 
 target_include_directories(Backend PUBLIC ${CMAKE_SOURCE_DIR}/include)
 

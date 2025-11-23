@@ -41,10 +41,10 @@ int main() {
   ErrorReporter::getInstance().printErrors();
 
   if (compUnit) {
-    lcc::codegen::CodeGen cg;
+    CodeGen cg;
     cg.generate(compUnit.get());
 
-    lcc::backend::IRModuleView mod;
+    IRModuleView mod;
     for (const auto &fp : cg.getFunctions()) {
       mod.functions.push_back(fp.get());
     }
@@ -59,7 +59,7 @@ int main() {
     }
 
     std::ofstream asmout("mips.txt");
-    lcc::backend::AsmGen asmgen;
+    AsmGen asmgen;
     asmgen.generate(mod, asmout);
   }
 
