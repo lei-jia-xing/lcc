@@ -1,25 +1,16 @@
 #pragma once
-
+#include <backend/RegisterAllocator.hpp>
+#include <codegen/Function.hpp>
 #include <ostream>
 #include <semantic/Symbol.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace lcc {
-namespace codegen {
-class Function;
-class BasicBlock;
-class Instruction;
-class Operand;
-} // namespace codegen
-} // namespace lcc
-
-namespace lcc::backend {
-
 struct IRModuleView {
-  std::vector<const codegen::Function *> functions;
-  std::vector<const codegen::Instruction *> globals;
+  std::vector<const Function *> functions;
+
+  std::vector<const Instruction *> globals;
   std::unordered_map<std::string, std::string> stringLiterals;
 };
 
@@ -37,7 +28,7 @@ public:
 private:
   void emitDataSection(const IRModuleView &mod, std::ostream &out);
   void emitTextSection(const IRModuleView &mod, std::ostream &out);
-  void emitFunction(const codegen::Function *func, std::ostream &out);
+  void emitFunction(const Function *func, std::ostream &out);
 
   /**
    * @brief tranfer a instruction to assembly instructions
@@ -45,7 +36,7 @@ private:
    * @param inst instruction to be lowered
    * @param output stream
    */
-  void lowerInstruction(const codegen::Instruction *inst, std::ostream &out);
+  void lowerInstruction(const Instruction *inst, std::ostream &out);
 
   /**
    * @brief allocate a register for a temporary variable
@@ -53,17 +44,19 @@ private:
    * @param tempId the temporary variable id
    */
   std::string regForTemp(int tempId) const;
-  std::string ensureInReg(const codegen::Operand &op, std::ostream &out,
+  std::string ensureInReg(const Operand &op, std::ostream &out,
                           const char *immScratch = "$t9",
                           const char *varScratch = "$t8");
 
   void comment(std::ostream &out, const std::string &txt);
 
   void analyzeGlobals(const IRModuleView &mod);
-  void analyzeFunctionLocals(const codegen::Function *func);
+  void analyzeFunctionLocals(const Function *func);
   void resetFunctionState();
 
 private:
+  RegisterAllocator _regAllocator;
+  std::map<int, int> _spillOffsets;
   bool emitComments_ = true;
   std::vector<RegDesc> regs_;
   int paramIndex_ = 0;
@@ -71,12 +64,11 @@ private:
   std::string curFuncName_;
 
   struct LocalInfo {
-    int offset = -1; // 相对 $sp 的正偏移
-    int size = 1;    // 以 word 为单位
+    int offset = -1;
+    int size = 1;
   };
-  // Key locals by Symbol* instead of name to avoid shadowing conflicts.
   std::unordered_map<const Symbol *, LocalInfo> locals_;
-  int frameSize_ = 0; // 包含保存 $ra 的槽位（最小 4）
+  int frameSize_ = 0; // 包含保存 $ra $fp 的槽位（最小 8）
   /**
    * @brief param index -> formal parameter variable name mapping for current
    */
@@ -84,11 +76,9 @@ private:
   /**
    * @brief >=4th arguments pending to be stored to stack for current function
    */
-  std::vector<codegen::Operand> pendingExtraArgs_;
+  std::vector<Operand> pendingExtraArgs_;
   /**
    * @brief unified epilogue label for current function
    */
   std::string currentEpilogueLabel_;
 };
-
-} // namespace lcc::backend

@@ -390,6 +390,7 @@ TypePtr SemanticAnalyzer::visit(LVal *node) {
     error(node->line, "c");
     return nullptr;
   }
+  node->type = symbolOpt.value().type;
   if (node->arrayIndex) {
     visit(node->arrayIndex.get());
     return symbolOpt.value().type->array_element_type;

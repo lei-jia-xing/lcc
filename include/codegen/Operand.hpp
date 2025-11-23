@@ -4,7 +4,6 @@
 #include <semantic/Symbol.hpp>
 #include <string>
 #include <variant>
-namespace lcc::codegen {
 
 enum class OperandType { Empty, Variable, Temporary, ConstantInt, Label };
 
@@ -28,5 +27,3 @@ private:
   OperandType _type;
   std::variant<std::shared_ptr<Symbol>, int> _value;
 };
-
-} // namespace lcc::codegen

@@ -5,8 +5,6 @@
 #include "semantic/Symbol.hpp"
 #include <iostream>
 
-using namespace lcc::codegen;
-
 void CodeGen::reset() {
   ctx_.func = nullptr;
   ctx_.curBlk.reset();
@@ -67,14 +65,10 @@ bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
     return tryEvalExp(pe->exp.get(), outVal);
   case PrimaryExp::PrimaryType::LVAL:
     if (pe->lval) {
-      // Check if there's a NON-CONST variable in current scope that shadows the
-      // const
       std::shared_ptr<Symbol> aliasSym = resolveAlias(pe->lval->ident);
       if (aliasSym && aliasSym->type && !aliasSym->type->is_const) {
-        // There's a non-const variable in current scope, don't use const value
         return false;
       }
-      // No non-const variable shadowing, check for const value
       auto it = constValues_.find(pe->lval->ident);
       if (it != constValues_.end()) {
         outVal = it->second;
@@ -201,7 +195,7 @@ bool CodeGen::tryEvalConst(RelExp *re, int &outVal) {
 bool CodeGen::tryEvalConst(EqExp *ee, int &outVal) {
   if (!ee)
     return false;
-  if (ee->op == EqExp::OpType::NONE)
+  if (!ee->left)
     return tryEvalConst(ee->relExp.get(), outVal);
   int lv, rv;
   if (!tryEvalConst(ee->left.get(), lv))
@@ -550,7 +544,6 @@ void CodeGen::genReturn(ReturnStmt *stmt) {
   emit(Instruction::MakeReturn(result));
 }
 
-// FIX:!!
 void CodeGen::genPrintf(PrintfStmt *stmt) {
   if (!stmt)
     return;
@@ -620,16 +613,19 @@ void CodeGen::genConstDef(ConstDef *def) {
     return;
   std::shared_ptr<Symbol> sym;
   if (!ctx_.func) {
+    // global variable
     sym = internSymbol(def->ident, def->type);
   } else {
+    // local varibale shadowing
     sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
     setAlias(def->ident, sym);
   }
+  // size alloca, default to 1 word
   Operand sizeOp = Operand::ConstantInt(1);
   if (def->arraySize) {
     sizeOp = genConstExp(def->arraySize.get());
   }
-  emit(Instruction::MakeDef(Operand::Variable(sym), sizeOp));
+  emit(Instruction::MakeAlloca(Operand::Variable(sym), sizeOp));
   if (def->constinitVal) {
     genConstInitVal(def->constinitVal.get(), sym);
   }
@@ -645,15 +641,18 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   }
 
   if (isStaticCtx && ctx_.curBlk) {
+    // for static variable, allocate a special name
     std::string gname = "_S_" +
-                        (ctx_.func ? ctx_.func->getName() : std::string("fn")) + "_" +
-                        def->ident;
+                        (ctx_.func ? ctx_.func->getName() : std::string("fn")) +
+                        "_" + def->ident;
     auto gsym = internSymbol(gname, def->type);
+    // variable shadowing
     setAlias(def->ident, gsym);
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
-      emitGlobal(Instruction::MakeDef(Operand::Variable(gsym),
-                                      Operand::ConstantInt(sizeInt)));
+      // static variable store in .data
+      emitGlobal(Instruction::MakeAlloca(Operand::Variable(gsym),
+                                         Operand::ConstantInt(sizeInt)));
     }
     if (def->initVal) {
       Operand var = Operand::Variable(gsym);
@@ -665,8 +664,6 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
       } else {
         for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
           auto &e = def->initVal->arrayExps[i];
-          if (!e)
-            continue;
           Operand v = genExp(e.get());
           emit(Instruction::MakeStore(
               v, var, Operand::ConstantInt(static_cast<int>(i))));
@@ -683,8 +680,8 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
     sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
     setAlias(def->ident, sym);
   }
-  emit(Instruction::MakeDef(Operand::Variable(sym),
-                            Operand::ConstantInt(sizeInt)));
+  emit(Instruction::MakeAlloca(Operand::Variable(sym),
+                               Operand::ConstantInt(sizeInt)));
   if (def->initVal) {
     genInitVal(def->initVal.get(), sym);
   }
@@ -706,8 +703,6 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
   // array
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &ce = init->arrayExps[i];
-    if (!ce)
-      continue;
     Operand v = genConstExp(ce.get());
     emit(Instruction::MakeStore(v, var, Operand::ConstantInt(i)));
   }
@@ -719,18 +714,25 @@ void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
   Operand var = Operand::Variable(sym);
   if (!init->isArray) {
     if (init->exp) {
-      Operand v = genExp(init->exp.get());
-      emit(Instruction::MakeAssign(v, var));
+      int constValue = 0;
+      if (sym->type && sym->type->is_const &&
+          tryEvalConst(init->exp->addExp.get(), constValue)) {
+        // compile-time eval
+        Operand v = Operand::ConstantInt(constValue);
+        emit(Instruction::MakeAssign(v, var));
+        constValues_[sym->name] = constValue;
+      } else {
+        // runtime eval
+        Operand v = genExp(init->exp.get());
+        emit(Instruction::MakeAssign(v, var));
+      }
     }
     return;
   }
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &e = init->arrayExps[i];
-    if (!e)
-      continue;
     Operand v = genExp(e.get());
-    emit(Instruction::MakeStore(v, var,
-                                Operand::ConstantInt(static_cast<int>(i))));
+    emit(Instruction::MakeStore(v, var, Operand::ConstantInt(i)));
   }
 }
 Operand CodeGen::genExp(Exp *exp) {
@@ -760,6 +762,14 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
   auto sym = aliasSym ? aliasSym : internSymbol(lval->ident);
   Operand base = Operand::Variable(sym);
   if (!lval->arrayIndex) {
+    if (lval->type && lval->type->category == Type::Category::Array) {
+      if (!index) { // is rvalue, as caller param
+        Operand addr = newTemp();
+        // pass address
+        emit(Instruction::MakeLoad(base, Operand(), addr));
+        return addr;
+      }
+    }
     // variable
     if (index)
       *index = Operand();

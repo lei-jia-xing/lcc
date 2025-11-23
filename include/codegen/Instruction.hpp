@@ -3,8 +3,6 @@
 #include "Operand.hpp"
 #include <string>
 
-namespace lcc::codegen {
-
 enum class OpCode {
   ADD, // ADD arg1, arg2, res
   SUB, // SUB arg1, arg2, res
@@ -65,8 +63,8 @@ public:
   static Instruction MakeCall(const Operand &func, int argCount,
                               const Operand &ret);
   static Instruction MakeReturn(const Operand &value);
-  static Instruction MakeDef(const Operand &symbol,
-                             const Operand &size); // DEF symbol size
+  static Instruction MakeAlloca(const Operand &symbol,
+                                const Operand &size); // DEF symbol size
 
   std::string toString() const;
 
@@ -86,5 +84,3 @@ private:
   Operand _arg2;
   Operand _result;
 };
-
-} // namespace lcc::codegen

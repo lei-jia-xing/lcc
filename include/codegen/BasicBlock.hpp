@@ -4,8 +4,6 @@
 #include <memory>
 #include <vector>
 
-namespace lcc::codegen {
-
 class BasicBlock {
 public:
   explicit BasicBlock(int id);
@@ -22,5 +20,3 @@ private:
   int _id;
   std::vector<Instruction> _instructions;
 };
-
-} // namespace lcc::codegen

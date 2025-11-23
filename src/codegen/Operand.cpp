@@ -2,8 +2,6 @@
 #include "codegen/Operand.hpp"
 #include <cassert>
 
-using namespace lcc::codegen;
-
 Operand::Operand() : _type(OperandType::Empty), _value(0) {}
 
 Operand::Operand(std::shared_ptr<Symbol> symbol)

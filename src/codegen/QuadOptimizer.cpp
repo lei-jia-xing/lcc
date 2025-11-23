@@ -1,8 +1,7 @@
 #include "codegen/QuadOptimizer.hpp"
 #include "codegen/Instruction.hpp"
 #include <optional>
-
-using namespace lcc::codegen;
+#include <unordered_map>
 
 static bool isConst(const Operand &op) {
   return op.getType() == OperandType::ConstantInt;
@@ -23,7 +22,7 @@ static bool hasSideEffect(OpCode op) {
   case OpCode::CALL:
   case OpCode::RETURN:
   case OpCode::PARAM:
-  case OpCode::DEF:
+  case OpCode::ALLOCA:
     return true;
   default:
     return false;
@@ -170,7 +169,8 @@ bool LocalDCEPass::run(Function &fn) {
           continue;
         }
       }
-      // 更新使用计数：如果是赋值到 tX 且我们删除/保留都需要正确传播，这里不做复杂传播，保留简单模型
+      // 更新使用计数：如果是赋值到 tX
+      // 且我们删除/保留都需要正确传播，这里不做复杂传播，保留简单模型
     }
   }
   return changed;

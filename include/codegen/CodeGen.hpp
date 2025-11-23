@@ -10,8 +10,6 @@
 #include <unordered_set>
 #include <vector>
 
-namespace lcc::codegen {
-
 class CodeGen {
 public:
   CodeGen() = default;
@@ -58,7 +56,7 @@ private:
 
   Operand genExp(Exp *exp);
   void genCond(Cond *cond, int tLbl, int fLbl);
-  Operand genLVal(LVal *lval, Operand *addrOut = nullptr);
+  Operand genLVal(LVal *lval, Operand *idx = nullptr);
   Operand genPrimary(PrimaryExp *pe);
   Operand genNumber(Number *num);
   Operand genUnary(UnaryExp *ue);
@@ -215,5 +213,3 @@ private:
     return loopStack_.empty() ? nullptr : &loopStack_.back();
   }
 };
-
-} // namespace lcc::codegen

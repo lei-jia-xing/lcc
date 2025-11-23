@@ -1,7 +1,5 @@
 #include "codegen/BasicBlock.hpp"
 
-using namespace lcc::codegen;
-
 BasicBlock::BasicBlock(int id) : _id(id) {}
 
 void BasicBlock::addInstruction(Instruction inst) {

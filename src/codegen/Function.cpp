@@ -1,7 +1,5 @@
 #include "codegen/Function.hpp"
 
-using namespace lcc::codegen;
-
 Function::Function(std::string name) : _name(std::move(name)) {}
 
 std::shared_ptr<BasicBlock> Function::createBlock() {
@@ -10,8 +8,12 @@ std::shared_ptr<BasicBlock> Function::createBlock() {
   return blk;
 }
 
-const std::vector<std::shared_ptr<BasicBlock>>& Function::getBlocks() const { return _blocks; }
+const std::vector<std::shared_ptr<BasicBlock>> &Function::getBlocks() const {
+  return _blocks;
+}
 
-std::vector<std::shared_ptr<BasicBlock>>& Function::getBlocks() { return _blocks; }
+std::vector<std::shared_ptr<BasicBlock>> &Function::getBlocks() {
+  return _blocks;
+}
 
-const std::string& Function::getName() const { return _name; }
+const std::string &Function::getName() const { return _name; }

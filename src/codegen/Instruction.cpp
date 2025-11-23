@@ -1,8 +1,6 @@
 #include "codegen/Instruction.hpp"
 #include <sstream>
 
-using namespace lcc::codegen;
-
 Instruction::Instruction(OpCode op, Operand a1, Operand a2, Operand res)
     : _op(op), _arg1(std::move(a1)), _arg2(std::move(a2)),
       _result(std::move(res)) {}
@@ -132,6 +130,7 @@ Instruction Instruction::MakeCall(const Operand &func, int argCount,
 Instruction Instruction::MakeReturn(const Operand &value) {
   return Instruction(OpCode::RETURN, value);
 }
-Instruction Instruction::MakeDef(const Operand &symbol, const Operand &size) {
+Instruction Instruction::MakeAlloca(const Operand &symbol,
+                                    const Operand &size) {
   return Instruction(OpCode::ALLOCA, symbol, size);
 }
