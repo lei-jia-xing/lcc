@@ -24,6 +24,23 @@ class AsmGen {
 public:
   AsmGen();
   void generate(const IRModuleView &mod, std::ostream &out);
+  
+  /**
+   * @brief Allocate a scratch register for temporary use
+   * @return Register name like "$t8" or "$t9", or empty if none available
+   */
+  std::string allocateScratch();
+  
+  /**
+   * @brief Release a scratch register when done
+   * @param reg The register to release (e.g., "$t8")
+   */
+  void releaseScratch(const std::string &reg);
+  
+  /**
+   * @brief Reset scratch register state (called at instruction boundaries)
+   */
+  void resetScratchState();
 
 private:
   void emitDataSection(const IRModuleView &mod, std::ostream &out);
@@ -53,7 +70,23 @@ private:
   void analyzeGlobals(const IRModuleView &mod);
   void analyzeFunctionLocals(const Function *func);
   void resetFunctionState();
+  
+  /**
+   * @brief Get a scratch register with automatic management
+   * Prefers $t8, falls back to $t9
+   */
+  std::string getFreeScratch() const;
 
+private:
+  /**
+   * @brief Scratch register reference counting
+   */
+  struct ScratchRegState {
+    std::string name;
+    int refCount = 0;
+  };
+  std::vector<ScratchRegState> scratchRegs_;
+  
 private:
   RegisterAllocator _regAllocator;
   std::map<int, int> _spillOffsets;

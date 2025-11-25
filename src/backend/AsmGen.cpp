@@ -11,6 +11,61 @@ AsmGen::AsmGen() {
   for (int i = 0; i < 10; ++i) {
     regs_.push_back({tRegs[i], false, -1});
   }
+  
+  // Initialize scratch registers with reference counting
+  scratchRegs_.push_back({"$t8", 0});
+  scratchRegs_.push_back({"$t9", 0});
+}
+
+// Number of registers that participate in allocation (excludes scratch registers)
+static const int NUM_ALLOCATABLE_REGS = 8;  // $t0-$t7
+
+std::string AsmGen::allocateScratch() {
+  // Try to find a scratch register with refCount == 0
+  for (auto &scratch : scratchRegs_) {
+    if (scratch.refCount == 0) {
+      scratch.refCount = 1;
+      return scratch.name;
+    }
+  }
+  
+  // All scratch registers are in use, return the one with lowest refCount
+  // This allows nested usage
+  auto &leastUsed = scratchRegs_[0];
+  for (auto &scratch : scratchRegs_) {
+    if (scratch.refCount < leastUsed.refCount) {
+      leastUsed = scratch;
+    }
+  }
+  leastUsed.refCount++;
+  return leastUsed.name;
+}
+
+void AsmGen::releaseScratch(const std::string &reg) {
+  for (auto &scratch : scratchRegs_) {
+    if (scratch.name == reg && scratch.refCount > 0) {
+      scratch.refCount--;
+      return;
+    }
+  }
+}
+
+void AsmGen::resetScratchState() {
+  for (auto &scratch : scratchRegs_) {
+    scratch.refCount = 0;
+  }
+}
+
+std::string AsmGen::getFreeScratch() const {
+  // Return the scratch register with lowest refCount
+  // Prefer $t8 over $t9 when both have same refCount
+  for (const auto &scratch : scratchRegs_) {
+    if (scratch.refCount == 0) {
+      return scratch.name;
+    }
+  }
+  // All are in use, return $t8 by default
+  return scratchRegs_.empty() ? "$t8" : scratchRegs_[0].name;
 }
 
 void AsmGen::generate(const IRModuleView &mod, std::ostream &out) {
@@ -267,6 +322,9 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 }
 
 void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
+  // Reset scratch register state at instruction boundary
+  resetScratchState();
+  
   auto op = inst->getOp();
   auto &a1 = inst->getArg1();
   auto &a2 = inst->getArg2();
@@ -330,8 +388,10 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rsrc << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rsrc << ", 0($t7)\n";
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rsrc << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
     }
     break;
@@ -341,11 +401,18 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::MUL:
   case OpCode::DIV:
   case OpCode::MOD: {
-    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-    std::string rb = ensureInReg(a2, out, "$t7", "$t7");
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t6";
+    std::string ra = ensureInReg(a1, out, "$t8", "$t8");
+    // Ensure rb uses different scratch if ra uses $t8
+    const char *rb_scratch = (ra == "$t8") ? "$t9" : "$t8";
+    std::string rb = ensureInReg(a2, out, rb_scratch, rb_scratch);
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
 
     switch (op) {
@@ -385,9 +452,14 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   }
   case OpCode::NEG: {
     std::string ra = ensureInReg(a1, out);
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t6";
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
     out << "  subu " << rd << ", $zero, " << ra << "\n";
     if (isTemp(res)) {
@@ -398,9 +470,16 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rd << ", 0($t7)\n";
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rd << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
+    }
+    
+    // Release rd if it was allocated as scratch
+    if (rdIsScratch) {
+      releaseScratch(rd);
     }
     break;
   }
@@ -410,11 +489,18 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::LE:
   case OpCode::GT:
   case OpCode::GE: {
-    std::string ra = ensureInReg(a1, out, "$t9", "$t8");
-    std::string rb = ensureInReg(a2, out, "$t7", "$t7");
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t6";
+    std::string ra = ensureInReg(a1, out, "$t8", "$t8");
+    // Ensure rb uses different scratch if ra uses $t8
+    const char *rb_scratch = (ra == "$t8") ? "$t9" : "$t8";
+    std::string rb = ensureInReg(a2, out, rb_scratch, rb_scratch);
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
     switch (op) {
     case OpCode::LT:
@@ -423,22 +509,34 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     case OpCode::GT:
       out << "  slt " << rd << ", " << rb << ", " << ra << "\n";
       break;
-    case OpCode::LE:
-      out << "  slt $t6, " << rb << ", " << ra << "\n";
-      out << "  xori " << rd << ", $t6, 1\n";
+    case OpCode::LE: {
+      std::string temp = allocateScratch();
+      out << "  slt " << temp << ", " << rb << ", " << ra << "\n";
+      out << "  xori " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
-    case OpCode::GE:
-      out << "  slt $t6, " << ra << ", " << rb << "\n";
-      out << "  xori " << rd << ", $t6, 1\n";
+    }
+    case OpCode::GE: {
+      std::string temp = allocateScratch();
+      out << "  slt " << temp << ", " << ra << ", " << rb << "\n";
+      out << "  xori " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
-    case OpCode::EQ:
-      out << "  subu $t6, " << ra << ", " << rb << "\n";
-      out << "  sltiu " << rd << ", $t6, 1\n";
+    }
+    case OpCode::EQ: {
+      std::string temp = allocateScratch();
+      out << "  subu " << temp << ", " << ra << ", " << rb << "\n";
+      out << "  sltiu " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
-    case OpCode::NEQ:
-      out << "  subu $t6, " << ra << ", " << rb << "\n";
-      out << "  sltu " << rd << ", $zero, $t6\n";
+    }
+    case OpCode::NEQ: {
+      std::string temp = allocateScratch();
+      out << "  subu " << temp << ", " << ra << ", " << rb << "\n";
+      out << "  sltu " << rd << ", $zero, " << temp << "\n";
+      releaseScratch(temp);
       break;
+    }
     default:
       break;
     }
@@ -450,17 +548,29 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rd << ", 0($t7)\n";
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rd << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
+    }
+    
+    // Release rd if it was allocated as scratch
+    if (rdIsScratch) {
+      releaseScratch(rd);
     }
     break;
   }
   case OpCode::NOT: {
     std::string ra = ensureInReg(a1, out);
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t6";
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
     out << "  sltiu " << rd << ", " << ra << ", 1\n";
     if (isTemp(res)) {
@@ -471,28 +581,51 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rd << ", 0($t7)\n";
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rd << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
+    }
+    
+    // Release rd if it was allocated as scratch
+    if (rdIsScratch) {
+      releaseScratch(rd);
     }
     break;
   }
   case OpCode::AND:
   case OpCode::OR: {
-    std::string ra = ensureInReg(a1, out);
-    std::string rb = ensureInReg(a2, out);
-    std::string ra1 = "$t6";
-    std::string rb1 = "$t7";
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t5";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t5";
+    std::string ra = ensureInReg(a1, out, "$t8", "$t8");
+    // Ensure rb uses different scratch if ra uses $t8
+    const char *rb_scratch = (ra == "$t8") ? "$t9" : "$t8";
+    std::string rb = ensureInReg(a2, out, rb_scratch, rb_scratch);
+    
+    // Allocate scratch registers for bool conversion
+    std::string ra1 = allocateScratch();
+    std::string rb1 = allocateScratch();
+    
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
+    
     out << "  sltu " << ra1 << ", $zero, " << ra << "\n";
     out << "  sltu " << rb1 << ", $zero, " << rb << "\n";
     if (op == OpCode::AND)
       out << "  and " << rd << ", " << ra1 << ", " << rb1 << "\n";
     else
       out << "  or " << rd << ", " << ra1 << ", " << rb1 << "\n";
+    
+    // Release bool conversion registers
+    releaseScratch(ra1);
+    releaseScratch(rb1);
+    
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     } else if (isVar(res)) {
@@ -501,16 +634,29 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rd << ", 0($t7)\n";
+        // Global variable - allocate scratch register
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rd << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
+    }
+    
+    // Release rd if it was allocated as scratch
+    if (rdIsScratch) {
+      releaseScratch(rd);
     }
     break;
   }
   case OpCode::LOAD: {
-    std::string rd = isTemp(res) ? regForTemp(res.asInt()) : "$t6";
-    if (isTemp(res) && _regAllocator.isSpilled(res.asInt())) {
-      rd = "$t6";
+    // Determine result register and track if it's scratch-allocated
+    bool rdIsScratch = false;
+    std::string rd;
+    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
+      rd = regForTemp(res.asInt());  // Use allocated register
+    } else {
+      rd = allocateScratch();  // Need scratch register
+      rdIsScratch = true;
     }
     if (isVar(a1)) {
       auto sym = a1.asSymbol();
@@ -518,28 +664,60 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       bool isArray =
           sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(sym.get());
+      
+      // First, handle the index if present (to avoid register conflicts)
+      std::string indexReg;
+      bool hasIndex = false;
+      if (isConst(a2)) {
+        // Constant index will be handled later
+      } else if (a2.getType() != OperandType::Empty) {
+        // Non-constant index: load it first before loading base
+        indexReg = ensureInReg(a2, out, "$t9", "$t8");
+        hasIndex = true;
+        // If index is in the same register as result, move it to $t8 to prevent clobbering
+        if (indexReg == rd) {
+          out << "  move $t8, " << indexReg << "\n";
+          indexReg = "$t8";
+        }
+      }
+      
+      // Now load the base address/value
       if (lit != locals_.end()) {
-        if (isArray) {
+        // Check if this symbol is a function parameter
+        bool isParam = false;
+        for (const Symbol* param : formalParamByIndex_) {
+          if (param == sym.get()) {
+            isParam = true;
+            break;
+          }
+        }
+        
+        // Array parameters are actually pointers, so we need to load the pointer value
+        // Local array variables need to compute the address
+        if (isArray && !isParam) {
+          // Local array: compute address
           out << "  addiu " << rd << ", $fp, " << lit->second.offset << "\n";
         } else {
+          // Regular variable or array parameter: load value/pointer
           out << "  lw " << rd << ", " << lit->second.offset << "($fp)\n";
         }
       } else {
         out << "  la " << rd << ", " << name << "\n";
       }
+      
+      // Now handle array indexing
       if (isConst(a2)) {
         int off = a2.asInt() * 4;
         out << "  lw " << rd << ", " << off << "(" << rd << ")\n";
-      } else {
-        if (a2.getType() == OperandType::Empty) {
-          // do nothing, rd already holds the address or value
-        } else {
-          std::string ri = ensureInReg(a2, out, "$t9", "$t7");
-          out << "  sll $t7, " << ri << ", 2\n";
-          out << "  addu " << rd << ", " << rd << ", $t7\n";
-          out << "  lw " << rd << ", 0(" << rd << ")\n";
-        }
+      } else if (hasIndex) {
+        // Use the index we loaded earlier
+        std::string offsetReg = allocateScratch();
+        out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
+        out << "  addu " << rd << ", " << rd << ", " << offsetReg << "\n";
+        out << "  lw " << rd << ", 0(" << rd << ")\n";
+        releaseScratch(offsetReg);
       }
+      // else: no index, rd already holds the address or value
     }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
@@ -549,11 +727,19 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (lit != locals_.end()) {
         out << "  sw " << rd << ", " << lit->second.offset << "($fp)\n";
       } else {
-        out << "  la $t7, " << sym->name << "\n";
-        out << "  sw " << rd << ", 0($t7)\n";
+        std::string scratch = allocateScratch();
+        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  sw " << rd << ", 0(" << scratch << ")\n";
+        releaseScratch(scratch);
       }
     }
+    
+    // Release rd if it was allocated as scratch
+    if (rdIsScratch) {
+      releaseScratch(rd);
+    }
     break;
+
   }
   case OpCode::STORE: {
     std::string rv = ensureInReg(a1, out);
@@ -563,7 +749,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       bool isArray =
           sym && sym->type && sym->type->category == Type::Category::Array;
       auto lit = locals_.find(sym.get());
-      std::string baseReg = "$t8";
+      std::string baseReg = allocateScratch();
       if (lit != locals_.end()) {
         if (isArray) {
           out << "  addiu " << baseReg << ", $fp, " << lit->second.offset
@@ -581,10 +767,13 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
             << ")\n";
       } else {
         std::string ri = ensureInReg(idxOp, out, "$t9", "$t9");
-        out << "  sll $t9, " << ri << ", 2\n";
-        out << "  addu " << baseReg << ", " << baseReg << ", $t9\n";
+        std::string offsetReg = allocateScratch();
+        out << "  sll " << offsetReg << ", " << ri << ", 2\n";
+        out << "  addu " << baseReg << ", " << baseReg << ", " << offsetReg << "\n";
         out << "  sw " << rv << ", 0(" << baseReg << ")\n";
+        releaseScratch(offsetReg);
       }
+      releaseScratch(baseReg);
     }
     break;
   }
@@ -617,10 +806,11 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::CALL: {
-    int saveSize = regs_.size() * 4;
+    // Only save allocatable registers, not scratch registers ($t8, $t9)
+    int saveSize = NUM_ALLOCATABLE_REGS * 4;
     if (saveSize > 0) {
       out << "  addiu $sp, $sp, -" << saveSize << "\n";
-      for (size_t i = 0; i < regs_.size(); ++i) {
+      for (int i = 0; i < NUM_ALLOCATABLE_REGS; ++i) {
         out << "  sw " << regs_[i].name << ", " << (i * 4) << "($sp)\n";
       }
     }
@@ -629,19 +819,29 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     if (extraCount > 0) {
       int extraBytes = extraCount * 4;
       out << "  addiu $sp, $sp, -" << extraBytes << "\n";
-      out << "  addiu $t6, $sp, 0\n";
+      // Use $sp directly to avoid $t8 being clobbered by ensureInReg
       for (int i = 0; i < extraCount; ++i) {
         const Operand &arg = pendingExtraArgs_[i];
         std::string r = ensureInReg(arg, out);
         int off = i * 4;
-        out << "  sw " << r << ", " << off << "($t6)\n";
+        out << "  sw " << r << ", " << off << "($sp)\n";
       }
+      // Set $t6 to point to the stack parameters for printf
+      out << "  move $t6, $sp\n";
     } else {
-      out << "  move $t6, $zero\n";
+      out << "  move $t6, $zero\n";  // $t6 used by printf implementation
     }
 
     std::string fname = isVar(a2) ? a2.asSymbol()->name : std::string("func");
     out << "  jal " << fname << "\n";
+
+    // Determine return value register before restoring
+    std::string returnReg;
+    bool hasReturn = false;
+    if (isTemp(res)) {
+      returnReg = regForTemp(res.asInt());
+      hasReturn = true;
+    }
 
     if (extraCount > 0) {
       int extraBytes = extraCount * 4;
@@ -649,17 +849,26 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       pendingExtraArgs_.clear();
     }
 
+    // Restore registers, but skip the return value register to avoid clobbering
     if (saveSize > 0) {
-      for (size_t i = 0; i < regs_.size(); ++i) {
+      for (int i = 0; i < NUM_ALLOCATABLE_REGS; ++i) {
+        if (hasReturn && regs_[i].name == returnReg) {
+          // Skip restoring this register as it will hold the return value
+          continue;
+        }
         out << "  lw " << regs_[i].name << ", " << (i * 4) << "($sp)\n";
       }
       out << "  addiu $sp, $sp, " << saveSize << "\n";
     }
 
+    // Now move return value after other registers are restored
+    if (hasReturn) {
+      out << "  move " << returnReg << ", $v0\n";
+    }
+
+    // Store to spill location after return value is in place
     if (isTemp(res)) {
-      std::string rd = regForTemp(res.asInt());
-      out << "  move " << rd << ", $v0\n";
-      storeToSpill(res.asInt(), rd);
+      storeToSpill(res.asInt(), returnReg);
     }
 
     paramIndex_ = 0;
