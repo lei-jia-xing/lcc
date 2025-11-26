@@ -61,6 +61,8 @@ static const char *opToStr(OpCode op) {
     return "LABEL";
   case OpCode::PARAM:
     return "PARAM";
+  case OpCode::ARG:
+    return "ARG";
   case OpCode::CALL:
     return "CALL";
   case OpCode::RETURN:
@@ -122,6 +124,12 @@ Instruction Instruction::MakeGoto(const Operand &label) {
 }
 Instruction Instruction::MakeLabel(const Operand &label) {
   return Instruction(OpCode::LABEL, label);
+}
+Instrunction Instruction::MakeParam(const Operand &idx, const Operand &var) {
+  return Instruction(OpCode::PARAM, idx, var);
+}
+Instruction Instruction::MakeArg(const Operand &arg) {
+  return Instruction(OpCode::ARG, arg, Operand(), Operand());
 }
 Instruction Instruction::MakeCall(const Operand &func, int argCount,
                                   const Operand &ret) {
