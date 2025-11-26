@@ -941,6 +941,7 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
   lAndExp->line = current.line;
   lastVnline = current.line;
   lAndExp->eqExp = parseEqExp();
+  lAndExp->op = LAndExp::OpType::NONE;
   // look ahead
   if (lexer.peekToken(1).type == TokenType::AND) {
     output("<LAndExp>");
@@ -951,6 +952,9 @@ std::unique_ptr<LAndExp> Parser::parseLAndExp() {
   while (current.type == TokenType::AND || current.type == TokenType::UNKNOWN) {
     auto newLeft = std::make_unique<LAndExp>();
     newLeft->left = std::move(lAndExp);
+    if (current.type == TokenType::AND) {
+      newLeft->op = LAndExp::OpType::AND;
+    }
     advance();
     newLeft->eqExp = parseEqExp();
     lAndExp = std::move(newLeft);
@@ -971,6 +975,7 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
   lOrExp->line = current.line;
   lastVnline = current.line;
   lOrExp->lAndExp = parseLAndExp();
+  lOrExp->op = LOrExp::OpType::NONE;
   // look ahead
   if (lexer.peekToken(1).type == TokenType::OR) {
     output("<LOrExp>");
@@ -981,6 +986,9 @@ std::unique_ptr<LOrExp> Parser::parseLOrExp() {
   while (current.type == TokenType::OR || current.type == TokenType::UNKNOWN) {
     auto newLeft = std::make_unique<LOrExp>();
     newLeft->left = std::move(lOrExp);
+    if (current.type == TokenType::OR) {
+      newLeft->op = LOrExp::OpType::OR;
+    }
     advance();
     newLeft->lAndExp = parseLAndExp();
     lOrExp = std::move(newLeft);

@@ -541,7 +541,9 @@ public:
  */
 class LAndExp : public ASTNode {
 public:
+  enum class OpType { NONE, AND };
   std::unique_ptr<LAndExp> left;
+  OpType op = OpType::NONE;
   std::unique_ptr<EqExp> eqExp;
   TypePtr type;
 };
@@ -553,7 +555,9 @@ public:
  */
 class LOrExp : public ASTNode {
 public:
+  enum class OpType { NONE, OR };
   std::unique_ptr<LOrExp> left;
+  OpType op = OpType::NONE;
   std::unique_ptr<LAndExp> lAndExp;
   TypePtr type;
 };
