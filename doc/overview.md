@@ -1,1026 +1,786 @@
-<!--toc:start-->
-- [LCC 编译器设计文档](#lcc-编译器设计文档)
-  - [概述](#概述)
-  - [编译器架构](#编译器架构)
-    - [项目结构](#项目结构)
-  - [词法分析器 (Lexer)](#词法分析器-lexer)
-    - [设计目标](#设计目标)
-    - [词法规则](#词法规则)
-  - [语法分析器 (Parser)](#语法分析器-parser)
-    - [设计目标](#设计目标)
-    - [AST 设计](#ast-设计)
-      - [1. AST 节点层次结构](#1-ast-节点层次结构)
-      - [2. 内存管理](#2-内存管理)
-    - [解析策略](#解析策略)
-      - [1. 递归下降解析](#1-递归下降解析)
-      - [2. 错误恢复](#2-错误恢复)
-      - [3. 前瞻解析](#3-前瞻解析)
-  - [编译流程](#编译流程)
-    - [主程序流程](#主程序流程)
-    - [输出格式](#输出格式)
-  - [构建系统](#构建系统)
-    - [CMake 配置](#cmake-配置)
-    - [构建步骤](#构建步骤)
-  - [开发指南](#开发指南)
-    - [代码风格](#代码风格)
-- [LCC 编译器 - Lexer 设计文档](#lcc-编译器-lexer-设计文档)
-  - [概述](#概述)
-    - [类结构](#类结构)
-  - [实现细节](#实现细节)
-    - [Token 类型定义](#token-类型定义)
-    - [词法分析流程](#词法分析流程)
-    - [静默模式](#静默模式)
-  - [错误处理](#错误处理)
-    - [错误类型](#错误类型)
-  - [文档补充](#文档补充)
-- [LCC 编译器 - Parser 设计文档](#lcc-编译器-parser-设计文档)
-  - [概述](#概述)
-  - [架构设计](#架构设计)
-    - [类结构](#类结构)
-  - [实现细节](#实现细节)
-    - [AST 节点设计](#ast-节点设计)
-    - [递归下降解析策略](#递归下降解析策略)
-    - [错误处理机制](#错误处理机制)
-      - [期望检查（Expect）](#期望检查expect)
-    - [静默模式](#静默模式)
-  - [解析流程](#解析流程)
-    - [主流程](#主流程)
-    - [语句解析策略](#语句解析策略)
-  - [错误处理](#错误处理)
-    - [错误类型](#错误类型)
-  - [与其他组件的交互](#与其他组件的交互)
-    - [与 Lexer 的交互](#与-lexer-的交互)
-  - [文档补充](#文档补充)
-<!--toc:end-->
+# LCC 编译器设计文档总览
 
-# LCC 编译器设计文档
+## 1. 引言
 
-## 概述
+LCC（Lightweight C Compiler）采用经典的多阶段编译架构，目标平台为 MIPS 架构。本文档概述了编译器各阶段的核心设计思想。
 
-LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子集编译器,目标架构为 MIPS。本文档详细描述了编译器的整体架构、各组件设计、实现细节
-
-## 编译器架构
-
-### 项目结构
+### 1.1 整体架构
 
 ```
-lcc/
-├── src/                          # 源代码目录
-│   ├── lexer/                    # 词法分析器
-│   │   └── Lexer.cpp
-│   └── parser/                   # 语法分析器
-│       └── Parser.cpp
-├── include/                      # 头文件目录
-│   ├── lexer/
-│   │   ├── Lexer.hpp
-│   │   └── Token.hpp
-│   └── parser/
-│       ├── Parser.hpp
-│       └── AST.hpp
-├── doc/                          # 文档目录
-│   └── compiler.md
-├── build/                        # 构建目录
-├── main.cpp                      # 主程序入口
-├── CMakeLists.txt                # 构建配置
-└── README.md                     # 项目说明
+.
+├── CMakeLists.txt
+├── config.json
+├── doc
+│   ├── compiler.md
+│   ├── EBNF.md
+│   ├── error.md
+│   ├── errorReporter.md
+│   ├── IR_DESIGN.md
+│   ├── lexer.md
+│   ├── overview.md
+│   ├── parser.md
+│   ├── REGISTER_CONVENTION.md
+│   └── semantic.md
+├── Doxyfile
+├── include
+│   ├── backend
+│   │   ├── AsmGen.hpp
+│   │   └── RegisterAllocator.hpp
+│   ├── codegen
+│   │   ├── BasicBlock.hpp
+│   │   ├── CodeGen.hpp
+│   │   ├── Function.hpp
+│   │   ├── Instruction.hpp
+│   │   ├── Operand.hpp
+│   │   └── QuadOptimizer.hpp
+│   ├── errorReporter
+│   │   └── ErrorReporter.hpp
+│   ├── lexer
+│   │   ├── Lexer.hpp
+│   │   └── Token.hpp
+│   ├── parser
+│   │   ├── AST.hpp
+│   │   └── Parser.hpp
+│   └── semantic
+│       ├── SemanticAnalyzer.hpp
+│       ├── Symbol.hpp
+│       ├── SymbolTable.hpp
+│       └── Type.hpp
+├── LICENSE
+├── main.cpp
+├── MARS2025+.jar
+├── README.md
+├── scripts
+│   └── test_mips.sh
+└── src
+    ├── backend
+    │   ├── AsmGen.cpp
+    │   └── RegisterAllocator.cpp
+    ├── CMakeLists.txt
+    ├── codegen
+    │   ├── BasicBlock.cpp
+    │   ├── CodeGen.cpp
+    │   ├── Function.cpp
+    │   ├── Instruction.cpp
+    │   ├── Operand.cpp
+    │   └── QuadOptimizer.cpp
+    ├── errorReporter
+    │   └── ErrorReporter.cpp
+    ├── lexer
+    │   └── Lexer.cpp
+    ├── parser
+    │   └── Parser.cpp
+    └── semantic
+        └── SemanticAnalyzer.cpp
 ```
 
-## 词法分析器 (Lexer)
+---
 
-### 设计目标
+## 2. 词法分析
 
-词法分析器负责将源代码字符流转换为 Token 流，为语法分析器提供输入。支持关键字、标识符、运算符、分隔符和字面量的识别。
+### 2.1 核心设计
 
-### 词法规则
+词法分析器将源代码字符流转换为Token流。
 
-| 类别 | 模式 | Token 类型 | 示例 |
-|------|------|------------|------|
-| 标识符 | `[a-zA-Z_][a-zA-Z0-9_]*` | `IDENFR` | `count`, `_temp` |
-| 整型常量 | `[0-9]+` | `INTCON` | `42`, `0` |
-| 字符串常量 | `"[^"]*"` | `STRCON` | `"Hello"` |
-| 关键字 | 预定义 | `CONSTTK`, `INTTK` 等 | `const`, `int` |
-| 运算符 | 预定义模式 | `PLUS`, `ASSIGN` 等 | `+`, `=` |
+**设计要点：**
 
-## 语法分析器 (Parser)
+- **宏Token定义**：使用 `TOKEN_LIST` `X`宏统一管理所有Token类型
+- **关键字表**：使用 `std::unordered_map` 存储保留字，O(1) 识别
+- **注释处理**：遇到注释自动跳过，递归调用返回下一个有效Token
 
-### 设计目标
+### 2.2 静默模式
 
-语法分析器采用递归下降解析法，将 Token 流转换为抽象语法树 (AST)。支持完整的语法分析、错误恢复和 AST 构建。
+**静默深度机制**：
 
-### AST 设计
+- 使用**引用计数**而非布尔值，支持多层嵌套的静默(这是因为我的向前看已经和输出绑定了，需要引入一个机制来解绑定)
+- 当 `silentDepth > 0` 时，禁止输出和错误打印
+- 用于Parser的向前看，避免污染输出流
 
-#### 1. AST 节点层次结构
+---
+
+## 3. 语法分析
+
+### 3.1 核心设计
+
+语法分析器采用**递归下降解析**，将Token流构建为抽象语法树（AST）。
+
+**设计要点：**
+
+- **EBNF驱动**：每个非终结符对应一个解析函数
+- **左递归消除**：将左递归文法改写为右递归
+- **Token前瞻**：通过 `lexer.peekToken(n)` 实现向前看`n`个`Token`
+- **错误恢复**：通过 `expect()` 机制进行错误检测,遇到错误忽略
+
+### 3.2 二义性处理
+
+**试探性解析策略**：对于标识符开头的语句（赋值 vs 表达式语句），采用以下方法：
+
+1. 保存当前状态
+2. 静默深度++，尝试解析
+3. 根据后续Token判断类型
+4. 静默深度--，按正确类型解析
+
+---
+
+## 4. 语义分析
+
+### 4.1 核心设计
+
+语义分析器遍历AST，构建符号表并进行类型检查。
+
+**设计要点：**
+
+- **单遍遍历**：采用访问者模式，一次遍历完成所有语义检查
+- **类型回填**：将推导出的类型信息回填到AST节点
+- **栈式符号表**：支持作用域嵌套，自动管理符号生命周期
+
+### 4.2 类型系统
+
+**三层分类（Category）**：
+
+- `Basic`：基本类型（int, void）
+- `Array`：数组类型，记录元素类型和维度
+- `Function`：函数类型，记录返回类型和参数列表
+
+### 4.3 符号表设计
+
+**栈式作用域管理**：
+
+- `records`：存储所有作用域历史
+- `active`：索引栈维护当前活跃作用域链
+- 支持从内层向外层逐层查找符号
+
+---
+
+## 5. 中间代码生成
+
+### 5.1 IR 模型概述
+
+LCC 采用**四元式形式的三地址码**作为中间表示，组织为**基本块（Basic Block）**和**控制流图（CFG）**。
+
+**设计目标：**
+
+- **简洁性**：易于从AST生成，形成一些中间数据结构，易于翻译到MIPS
+- **可读性**：便于调试和优化
+- **非SSA形式**：变量可多次赋值，降低实现复杂度，但是在中间数据结构的形式是单次赋值的,会分配一个递增id，目前未实现phi函数
+
+**层次结构：**
 
 ```
-ASTNode (基类)
-├── CompUnit (编译单元)
-├── Decl (声明)
-│   ├── ConstDecl (常量声明)
-│   └── VarDecl (变量声明)
-├── FuncDef (函数定义)
-├── MainFuncDef (主函数定义)
-├── Stmt (语句)
-│   ├── AssignStmt (赋值语句)
-│   ├── ExpStmt (表达式语句)
-│   ├── BlockStmt (复合语句)
-│   ├── IfStmt (条件语句)
-│   ├── ForStmt (循环语句)
-│   ├── BreakStmt (break语句)
-│   ├── ContinueStmt (continue语句)
-│   ├── ReturnStmt (return语句)
-│   └── PrintfStmt (printf语句)
-└── Exp (表达式)
-    ├── LVal (左值)
-    ├── PrimaryExp (基本表达式)
-    ├── UnaryExp (一元表达式)
-    ├── MulExp (乘除模表达式)
-    ├── AddExp (加减表达式)
-    ├── RelExp (关系表达式)
-    ├── EqExp (相等性表达式)
-    ├── LAndExp (逻辑与表达式)
-    └── LOrExp (逻辑或表达式)
+Module (整个程序)
+├── GlobalInstructions (全局变量定义)
+└── Function[]
+    └── BasicBlock[]
+        └── Instruction[]
 ```
 
-#### 2. 内存管理
+### 5.2 操作数设计
 
-- 使用智能指针 (`std::unique_ptr`) 管理 AST 节点生命周期
-- 采用移动语义传递 AST 节点，避免不必要的拷贝
-- 所有 AST 节点都继承自 `ASTNode` 基类
-
-### 解析策略
-
-#### 1. 递归下降解析
-
-- 每个语法规则对应一个解析函数
-- 左递归消除：通过改写语法规则避免左递归
-- 运算符优先级：通过语法层次结构实现
-
-#### 2. 错误恢复
-
-- **局部话处理**: 遇到错误直接忽略，假装他是正确的，继续往下解析
-- **静默解析**: 错误期间静默临时解析，避免级联错误
-
-#### 3. 前瞻解析
-
-- 利用 `peekToken()` 进行多 Token 前瞻
-- 支持歧义消解（如赋值语句与表达式语句的区分）
-- 预检查语法构造的合法性
-
-## 编译流程
-
-### 主程序流程
+操作数是IR指令的参数或结果，统一表示为：
 
 ```cpp
-int main() {
-    // 1. 文件 I/O 重定向
-    std::ifstream inputfile("testfile.txt");
-    std::string fileContent = /* 读取文件 */;
+enum class OperandType { Empty, Variable, Temporary, ConstantInt, Label };
 
-    // 2. 词法分析
-    Lexer lexer(fileContent);
-    auto firstToken = lexer.nextToken();
+class Operand {
+public:
+  Operand();
+  explicit Operand(std::shared_ptr<Symbol> symbol);
+  static Operand Temporary(int tempId);
+  static Operand ConstantInt(int v);
+  static Operand Label(int id);
+  static Operand Variable(std::shared_ptr<Symbol> sym);
 
-    // 3. 语法分析
-    Parser parser(std::move(lexer), firstToken);
-    auto compUnit = parser.parseCompUnit();
+  OperandType getType() const { return _type; }
+  std::string toString() const;
 
-    // 4. (未来) 语义分析与代码生成
+  const std::shared_ptr<Symbol> &asSymbol() const; // Variable
+  int asInt() const; // Temporary / ConstantInt / Label id
 
-    return 0;
+private:
+  Operand(OperandType t, std::variant<std::shared_ptr<Symbol>, int> val);
+  OperandType _type;
+  std::variant<std::shared_ptr<Symbol>, int> _value;
+};
+```
+
+**四种操作数类型：**
+
+| 类型 | 说明 | 示例 | 语义 |
+|------|------|------|------|
+| `Variable` | 程序变量 | `x`, `arr`, `func` | 关联符号表，包含类型信息 |
+| `Temporary` | 临时变量 | `%t0`, `%t1` | 中间计算结果，ID唯一标识 |
+| `ConstantInt` | 整数常量 | `42`, `0`, `-1` | 32位有符号整数 |
+| `Label` | 跳转标签 | `L0`, `L1` | 基本块入口，ID唯一标识 |
+
+**设计要点：**
+
+- 统一的操作数表示简化指令处理逻辑
+- 符号内联（Symbol Interning）：全局唯一的符号对象，支持指针比较
+- 临时变量自动分配，避免命名冲突
+
+### 5.3 指令集设计
+
+指令采用四元式格式：`(OpCode, src1, src2, dest)`,以下的`-`代表置空
+
+#### 5.3.1 算术运算
+
+| 指令 | 格式 | 语义 | MIPS映射 |
+|------|------|------|----------|
+| `ADD` | `ADD a, b, rd` | `rd = a + b` | `addu rd, ra, rb` |
+| `SUB` | `SUB a, b, rd` | `rd = a - b` | `subu rd, ra, rb` |
+| `MUL` | `MUL a, b, rd` | `rd = a * b` | `mul rd, ra, rb` |
+| `DIV` | `DIV a, b, rd` | `rd = a / b` | `div ra, rb; mflo rd` |
+| `MOD` | `MOD a, b, rd` | `rd = a % b` | `div ra, rb; mfhi rd` |
+| `NEG` | `NEG a, -, rd` | `rd = -a` | `subu rd, $zero, ra` |
+
+**设计要点**：
+
+- `ADD`,`SUB`,`MUL`,`DIV`,`MOD` 这些都是`Binary`类型的二元运算
+- `NEG`是`Unary`类型的一元运算
+- 在实现中使用`MakeBinary`和`MakeUnary`工厂函数来封装实现
+
+#### 5.3.2 比较运算
+
+比较运算结果恒为 `0`或 `1`。
+
+| 指令 | 格式 | 语义 | 实现策略 |
+|------|------|------|----------|
+| `EQ` | `EQ a, b, rd` | `rd = (a == b)` | `sub + sltiu` 组合 |
+| `NEQ` | `NEQ a, b, rd` | `rd = (a != b)` | `sub + sltu` 组合 |
+| `LT` | `LT a, b, rd` | `rd = (a < b)` | `slt rd, ra, rb` |
+| `LE` | `LE a, b, rd` | `rd = (a <= b)` | `slt + xori` 组合 |
+| `GT` | `GT a, b, rd` | `rd = (a > b)` | `slt rd, rb, ra`（交换操作数）|
+| `GE` | `GE a, b, rd` | `rd = (a >= b)` | `slt + xori` 组合 |
+
+#### 5.3.3 逻辑运算
+
+逻辑运算结果恒为 `0`或 `1`。
+
+| 指令 | 格式 | 语义 | 实现策略 |
+|------|------|------|----------|
+| `AND`| `AND arg1, arg2, rd` | `rd = arg1 && arg2` | `and + sltiu` 组合 |
+| `OR` | `OR arg1, arg2, rd` | `rd = arg1 \|\| arg2` | `or + sltu` 组合 |
+| `NOT`| `NOT arg, -, rd` | `rd = !arg` | `sltiu rd, ra, 1` |
+
+**设计要点**：
+
+- `AND` `OR`,这是都是`Binary`类型的二元运算
+- `NOT`是`Unary`类型的一元运算
+- 在实现中使用`MakeBinary`和`MakeUnary`工厂函数来封装实现
+
+#### 5.3.4 赋值操作
+
+赋值采用**值语义**，即右值计算后赋给左值。
+
+| 指令 | 格式 | 语义 | 实现策略 |
+|------|------|------|----------|
+| `ASSIGN` | `ASSIGN src, -, dst` | `dst = src` | 直接赋值 |
+
+**设计要点**
+
+- `ASSIGN`在此`EBNF`文法中是一条语句，不是一个表达式，因此我们没有把`res`放到临时变量中
+
+#### 5.3.5 内存访问
+
+数组按**地址语义**处理，索引为**元素索引**（非字节偏移）。
+
+| 指令 | 格式 | 语义 | 地址计算 |
+|------|------|------|----------|
+| `LOAD` | `LOAD base, idx, dst` | `dst = base[idx]` | `addr = base + idx * 4` |
+| `STORE` | `STORE val, base, idx` | `base[idx] = val` | `addr = base + idx * 4` |
+
+**设计要点**
+
+- `LOAD` 以及`STORE`用于元素的读写操作，主要在后端代码生成阶段读取在栈帧上的变量或者在`.data`上的变量
+
+#### 5.3.6 控制流
+
+| 指令 | 格式 | 语义 | 用途 |
+|------|------|------|------|
+| `LABEL` | `LABEL L` | 定义标签L | 基本块入口 |
+| `GOTO` | `GOTO L` | 无条件跳转到L | goto, 循环 |
+| `IF` | `IF cond - L` | 条件跳转到L | if + goto label |
+**设计要点**：
+
+-
+
+#### 5.3.5 函数调用
+
+函数调用分为三步：参数传递、调用、返回值接收。
+
+| 指令 | 格式 | 语义 |
+|------|------|------|
+| `PARAM` | `PARAM arg1 - res` | 追加参数到参数列表以及函数声明 |
+| `CALL` | `CALL argc, func, ret` | 调用函数，ret接收返回值 |
+| `RETURN` | `RETURN - - res` | 函数返回,返回值与`genExp`相关，若`AST`节点无对应信息，则返回一个`EMPTY`的`Operand`|
+
+**设计要点**：
+
+- `PARAM`指令采取二合一的策略，`CALLER`和`CALLEE`都是用他来生成中间代码
+  - 对于`CALLER`,`res`总是置`EMPTY`,`CALLER`只负责把参数压入栈中,这个参数可能是`Variable`,`Temporary`,`ConstantInt`
+  - 对于`CALLEE`,也就是`Function`,负责声明参数列表和数量,`arg1`代表参数索引（从0开始），`res`代表参数符号
+  
+#### 5.3.6 声明与分配
+
+| 指令 | 格式 | 语义 |
+|------|------|------|
+| `ALLOCA` | `ALLOCA base - size` | 分配空间，`size`单位为word,后端根据变量语义看分配在栈帧还是`.data`段 |
+
+### 5.4 短路求值（核心特性）
+
+逻辑运算符（`&&`, `||`）采用**控制流实现**而非值计算，支持短路求值。
+
+#### 5.4.1 双模式生成
+
+**条件模式**（用于 `if/for` 的条件）：
+
+```c
+// C: if (a && b) { then_block }
+```
+
+```
+// IR:
+BEQ a, 0, false_label    // a为假，跳过b的求值
+BEQ b, 0, false_label    // b为假，跳转到false
+// then_block
+JUMP end_label
+LABEL false_label
+// else_block (可选)
+LABEL end_label
+```
+
+**值模式**（用于赋值语句）：
+
+```c
+// C: int result = a && b;
+```
+
+```
+// IR:
+BEQ a, 0, false_label    // a为假，结果为0
+BEQ b, 0, false_label    // b为假，结果为0
+ASSIGN 1, -, %t0         // 都为真，结果为1
+JUMP end_label
+LABEL false_label
+ASSIGN 0, -, %t0         // 结果为0
+LABEL end_label
+ASSIGN %t0, -, result
+```
+
+#### 5.4.2 逻辑或（||）
+
+```c
+// C: if (a || b) { then_block }
+```
+
+```
+// IR:
+BNE a, 0, true_label     // a为真，直接进入then
+BNE b, 0, true_label     // b为真，进入then
+// else_block
+JUMP end_label
+LABEL true_label
+// then_block
+LABEL end_label
+```
+
+**设计理由：**
+
+- 避免不必要的计算，生成高效的MIPS代码
+- 双模式设计兼顾条件表达式和值表达式的不同需求
+
+### 5.5 基本块（Basic Block）划分
+
+**基本块性质：**
+
+- **单入口**：只能从第一条指令进入
+- **单出口**：只有最后一条指令可能是跳转或返回
+- **顺序执行**：中间指令无跳转
+
+**自动划分规则：**
+
+1. 遇到 `LABEL` 指令，开始新的基本块
+2. 遇到跳转指令（`JUMP/BEQ/BNE/RET`），结束当前基本块
+3. 跳转指令的下一条指令（如果存在）开始新的基本块
+
+**控制流连接：**
+
+- 顺序后继（fallthrough）：条件跳转的不跳转分支
+- 跳转后继（jumpTarget）：跳转指令的目标
+
+**设计理由：**
+
+- 基本块是数据流分析和优化的基本单位
+- 为寄存器分配的活跃性分析提供了清晰的分析边界
+
+### 5.6 符号内联（Symbol Interning）
+
+**设计思想：**
+
+- 全局唯一的符号对象，相同名称的符号共享同一对象
+- 支持指针比较，`sym1.get() == sym2.get()` 即可判断是否为同一符号
+- 简化IR优化中的符号查找和比较
+
+**实现：**
+
+```cpp
+std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
+
+std::shared_ptr<Symbol> internSymbol(const std::string &name, TypePtr type) {
+  auto it = symbols_.find(name);
+  if (it != symbols_.end()) return it->second;
+  auto sym = std::make_shared<Symbol>(name, type);
+  symbols_[name] = sym;
+  return sym;
 }
 ```
 
-### 输出格式
+### 5.7 IR 优化
 
-- **词法分析输出**: `Token类型 值` 格式，输出到 `parser.txt`
-- **语法分析输出**: `非终结符名称` 格式，输出到 `parser.txt`
-- **错误输出**: `行号 错误类型` 格式，输出到 `error.txt`
+#### 5.7.1 常量折叠（Constant Folding）
 
-## 构建系统
+**策略**：在IR生成阶段，尝试编译期计算常量表达式。
 
-### CMake 配置
+**示例：**
 
-```cmake
-cmake_minimum_required(VERSION 3.10)
-project(Compiler)
-set(CMAKE_CXX_STANDARD 17)
+```c
+// C: int x = 2 + 3;
+// 优化前IR:
+ADD 2, 3, %t0
+ASSIGN %t0, -, x
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
-
-# 词法分析器库
-add_library(lexer lexer/Lexer.cpp)
-
-# 语法分析器库
-add_library(parser parser/Parser.cpp)
-
-# 主程序
-add_executable(Compiler main.cpp)
-
-target_link_libraries(Compiler lexer parser)
+// 优化后IR:
+ASSIGN 5, -, x    // 常量折叠为5
 ```
 
-### 构建步骤
+#### 5.7.2 死代码消除（Dead Code Elimination）
 
-```bash
-mkdir build && cd build
-cmake ..
-make
-./Compiler
+**策略**：移除无法到达的基本块。
+
+**示例：**
+
+```c
+// C: return 1; x = 2;  // return后的代码无法到达
+// 优化：移除 x = 2 所在的基本块
 ```
 
-## 开发指南
+---
 
-### 代码风格
+## 6. 后端代码生成（Backend Code Generation）
 
-- 使用 Doxygen 风格注释
-- 遵循 Google C++ 编码规范
-- 使用现代 C++ 特性 (C++17)
+### 6.1 核心设计
 
-# LCC 编译器 - Lexer 设计文档
+后端代码生成器（AsmGen）将IR翻译为MIPS汇编代码，核心任务包括：
 
-## 概述
+- **寄存器分配**：图着色算法
+- **指令选择**：IR指令到MIPS指令的映射
+- **栈帧管理**：局部变量和参数的内存布局
 
-Lexer（词法分析器）是 LCC 编译器的第一个阶段，负责将源代码字符串转换为一系列的 Token 流。本文档详细介绍了 Lexer 的设计架构、实现细节和使用方式。
+### 6.2 MIPS 寄存器概览
 
-### 类结构
+MIPS架构提供32个通用寄存器，按用途分类：
+
+| 寄存器 | 名称 | 用途 | 调用约定 |
+|--------|------|------|----------|
+| `$zero` | 常量0 | 硬件常量 | N/A |
+| `$v0-$v1` | 返回值 | 函数返回值 | Caller-Save |
+| `$a0-$a3` | 参数 | 前4个参数 | Caller-Save |
+| `$t0-$t7` | 临时 | 可分配寄存器 | Caller-Save |
+| `$t8-$t9` | 临时 | Scratch寄存器 | Caller-Save |
+| `$s0-$s7` | 保存 | 跨函数保存 | Callee-Save（未使用）|
+| `$sp` | 栈指针 | 栈顶 | Callee-Save |
+| `$fp` | 帧指针 | 栈帧基址 | Callee-Save |
+| `$ra` | 返回地址 | 函数返回 | Callee-Save |
+
+### 6.3 寄存器使用策略
+
+#### 6.3.1 寄存器分类
+
+**分配寄存器（Allocatable Registers）**：
+
+- **寄存器**：`$t0-$t7`（共8个）
+- **用途**：通过图着色算法动态分配给IR临时变量
+- **特点**：参与寄存器分配，生命周期由活跃性分析确定
+
+**Scratch 寄存器（Scratch Registers）**：
+
+- **寄存器**：`$t8, $t9`（共2个）
+- **用途**：指令翻译过程中的临时计算
+- **特点**：**不参与**寄存器分配，每条IR指令翻译后自动释放
+
+**参数寄存器**：`$a0-$a3`，用于函数调用时传递前4个参数
+
+**返回值寄存器**：`$v0`，存放函数返回值
+
+**特殊寄存器**：`$ra`（返回地址）、`$sp`（栈指针）、`$fp`（帧指针）
+
+### 6.4 寄存器分配算法
+
+#### 6.4.1 图着色（Graph Coloring）
+
+**核心思想**：将寄存器分配问题转化为图着色问题。
+
+**步骤：**
+
+**1. 活跃性分析（Liveness Analysis）**
+
+基于数据流方程计算每个基本块的活跃变量集合：
+
+```
+liveOut[B] = ∪(liveIn[S]) for all successors S of B
+liveIn[B]  = use[B] ∪ (liveOut[B] - def[B])
+```
+
+- `use[B]`：基本块B中在定义前使用的变量
+- `def[B]`：基本块B中被定义的变量
+- `liveOut[B]`：基本块B结束时活跃的变量
+- `liveIn[B]`：基本块B开始时活跃的变量
+
+迭代计算直到不动点（所有基本块的 `liveIn` 和 `liveOut` 不再变化）。
+
+**2. 构建冲突图（Interference Graph）**
+
+- **节点**：所有IR临时变量
+- **边**：如果两个临时变量的生命周期重叠（同时活跃），则它们之间有边
+- 判断依据：如果 `t1 ∈ liveOut[B]` 且 `t2 ∈ def[B]`，则 `t1` 和 `t2` 冲突
+
+**3. 图着色**
+
+- **简化**：迭代移除度数 < K 的节点（K=8，可分配寄存器数量），压入栈
+- **潜在溢出**：若所有节点度数 ≥ K，选择一个节点标记为潜在溢出
+- **着色**：从栈中弹出节点，为每个节点选择一个颜色（寄存器ID：0-7），该颜色不与已着色的邻居冲突
+- **溢出**：若无法找到可用颜色，标记为溢出（spill）
+
+**4. 寄存器映射**
+
+| 颜色ID | 物理寄存器 |
+|--------|-----------|
+| 0      | `$t0`     |
+| 1      | `$t1`     |
+| 2      | `$t2`     |
+| 3      | `$t3`     |
+| 4      | `$t4`     |
+| 5      | `$t5`     |
+| 6      | `$t6`     |
+| 7      | `$t7`     |
+
+**5. 溢出处理（Spill Handling）**
+
+- 溢出的临时变量分配在栈帧中
+- 使用时从内存加载到scratch寄存器（`$t8/$t9`）
+- 定义时从scratch寄存器存储到内存
+
+**示例：**
+
+```mips
+# 假设 %t10 溢出到 spillOffset($fp)
+# IR: ADD %t10, %t1, %t2
+lw $t8, spillOffset($fp)   # 加载溢出的 %t10
+addu $t2, $t8, $t1          # 执行计算
+```
+
+#### 6.4.2 设计理由
+
+- **图着色是NP完全问题**，但对于小规模（函数级别）问题，贪心算法效果良好
+- **8个可分配寄存器**足以应对大多数函数的寄存器需求
+- **Caller-Save策略**简化实现，函数调用时所有 `$t` 寄存器失效
+
+### 6.5 Scratch 寄存器管理
+
+#### 6.5.1 引用计数机制
 
 ```cpp
-class Lexer {
-private:
-  /**
-   * @brief source programe to be analyzed
-   */
-  std::string source;
-  /**
-   * @brief current position in source
-   */
-  size_t pos;
-  /**
-   * @brief current line number in source
-   */
-  int line;
-
-  /**
-   * @brief reserve keyword in this EBNF
-   */
-  inline static std::unordered_map<std::string, TokenType> reserveWords = {
-      {"const", TokenType::CONSTTK},       {"int", TokenType::INTTK},
-      {"static", TokenType::STATICTK},     {"break", TokenType::BREAKTK},
-      {"continue", TokenType::CONTINUETK}, {"if", TokenType::IFTK},
-      {"main", TokenType::MAINTK},         {"else", TokenType::ELSETK},
-      {"for", TokenType::FORTK},           {"return", TokenType::RETURNTK},
-      {"void", TokenType::VOIDTK},         {"printf", TokenType::PRINTFTK}};
-  /**
-   * @brief skip whitespace
-   */
-  void skipwhitespace();
-
-public:
-  /**
-   * @brief silent depth for error and output
-   */
-  inline static int silentDepth = 0;
-  /**
-   * @brief error logging
-   *
-   * @param line current line number
-   * @param errorType errorType to show
-   */
-  void error(const int &line, const std::string errorType);
-  /**
-   * @brief constructor for Lexer
-   *
-   * @param source source programe to be analyzed
-   * @param pos current position in source
-   * @param line current line number in source
-   */
-  Lexer(std::string source, size_t pos = 0, int line = 1);
-  /**
-   * @brief a function to get next token and output, error logging
-   *
-   * @return next Token
-   */
-  Token nextToken();
-  /**
-   * @brief to enable or disable silent for error and output
-   *
-   * @param silent whether to change silent depth
-   */
-  void silentPV(bool silent);
-  /**
-   * @brief a function to output
-   *
-   * @param type TokenType
-   * @param value token lexeme
-   */
-  void output(const std::string &type, const std::string &value);
-
-  /**
-   * @brief look ahead n tokens without consuming them
-   *
-   * @param n look ahead n tokens
-   * @return the n-th token
-   */
-  Token peekToken(int n);
+struct ScratchRegState {
+  std::string name;  // "$t8" or "$t9"
+  int refCount = 0;  // 当前引用计数
 };
 ```
 
-## 实现细节
+**操作：**
 
-### Token 类型定义
+- `allocateScratch()`：优先选择 `refCount == 0` 的寄存器，增加引用计数
+- `releaseScratch(reg)`：减少指定寄存器的引用计数
+- `resetScratchState()`：每条IR指令翻译完成后调用，重置所有引用计数为0
 
-使用宏定义自动生成 Token 类型枚举，确保代码的一致性和可维护性：
+#### 6.5.2 使用场景
+
+**1. 加载立即数**
+
+```mips
+li $t8, 42
+```
+
+**2. 加载变量**
+
+```mips
+lw $t8, offset($fp)     # 局部变量
+la $t8, global_var      # 全局变量
+lw $t8, 0($t8)
+```
+
+**3. 溢出变量的加载与存储**
+
+```mips
+lw $t8, spillOffset($fp)  # 加载溢出变量
+# ... 使用 $t8 ...
+sw $t8, spillOffset($fp)  # 存回溢出位置
+```
+
+**4. 数组地址计算**
+
+```mips
+la $t8, array_base       # 基址
+sll $t9, index, 2        # index * 4
+addu $t8, $t8, $t9       # base + offset
+lw $t8, 0($t8)           # 加载元素
+```
+
+#### 6.5.3 冲突避免
+
+在翻译二元运算时，确保两个操作数使用不同的scratch寄存器：
 
 ```cpp
-#define TOKEN_LIST                                                             \
-  X(IDENFR)                                                                    \
-  X(INTCON)                                                                    \
-  X(STRCON)                                                                    \
-  X(CONSTTK)                                                                   \
-  X(INTTK)                                                                     \
-  X(STATICTK)                                                                  \
-  X(BREAKTK)                                                                   \
-  X(CONTINUETK)                                                                \
-  X(IFTK)                                                                      \
-  X(MAINTK)                                                                    \
-  X(ELSETK)                                                                    \
-  X(NOT)                                                                       \
-  X(AND)                                                                       \
-  X(OR)                                                                        \
-  X(FORTK)                                                                     \
-  X(RETURNTK)                                                                  \
-  X(VOIDTK)                                                                    \
-  X(PLUS)                                                                      \
-  X(MINU)                                                                      \
-  X(PRINTFTK)                                                                  \
-  X(MULT)                                                                      \
-  X(DIV)                                                                       \
-  X(MOD)                                                                       \
-  X(LSS)                                                                       \
-  X(LEQ)                                                                       \
-  X(GRE)                                                                       \
-  X(GEQ)                                                                       \
-  X(EQL)                                                                       \
-  X(NEQ)                                                                       \
-  X(SEMICN)                                                                    \
-  X(COMMA)                                                                     \
-  X(LPARENT)                                                                   \
-  X(RPARENT)                                                                   \
-  X(LBRACK)                                                                    \
-  X(RBRACK)                                                                    \
-  X(LBRACE)                                                                    \
-  X(RBRACE)                                                                    \
-  X(ASSIGN)                                                                    \
-  X(EOFTK)                                                                     \
-  X(UNKNOWN)
+std::string ra = ensureInReg(a1, out, "$t8", "$t8");
+const char *rb_scratch = (ra == "$t8") ? "$t9" : "$t8";
+std::string rb = ensureInReg(a2, out, rb_scratch, rb_scratch);
 ```
 
-### 词法分析流程
+### 6.6 函数调用约定
 
-1. **Token 识别**
-   - **数字识别**：连续数字字符组成整型常量
-   - **标识符/关键字**：字母、下划线开头，后跟字母数字下划线
-   - **运算符识别**：支持单字符和双字符运算符
-   - **字符串常量**：双引号包围的字符序列
-   - **分隔符识别**：括号、分号、逗号等
-   - 注释自动跳过：直接获取下一个Token
+#### 6.6.1 调用者（Caller）
 
-2. **错误处理**
-   - 非法字符识别（如单独的 `&`、`|`）
-   - 输出错误信息到 `stderr`
+**函数调用前：**
 
-### 静默模式
+1. 准备参数：前4个参数放入 `$a0-$a3`，第5+个参数压栈
+2. 调用函数：`jal function_name`
+3. 获取返回值：返回值在 `$v0` 中
 
-此`lexer`设计了一个名为`silentDepth`的静默深度变量（也可以说是静默引用变量）,为什么需要设置成引用计数而不是一个bool数呢？
-因为lcc的前端目标是设计成流式处理的，在`Parser`使用向前看过程中，我们必须要要把静默模式关掉，同时为了可拓展性，我们允许
-多层静默嵌套,只有当`silentDepth`为`0`时，才允许输出和错误打印。
+#### 6.6.2 被调用者（Callee）
 
-```c++
-void Lexer::silentPV(bool silent) {
-  if (silent) {
-    silentDepth++;
-  } else {
-    silentDepth > 0 ? silentDepth-- : silentDepth = 0;
-  }
-}
+**函数序言（Prologue）：**
+
+```mips
+function_name:
+    # 1. 分配栈帧
+    addiu $sp, $sp, -frameSize
+    
+    # 2. 保存 $ra 和 $fp
+    sw $ra, 0($sp)
+    sw $fp, 4($sp)
+    
+    # 3. 设置新的帧指针
+    move $fp, $sp
+    
+    sw $a0, 8($fp)      # 第1个参数
+    sw $a1, 12($fp)     # 第2个参数
+    sw $a2, 16($fp)     # 第3个参数
+    sw $a3, 20($fp)     # 第4个参数
 ```
 
-## 错误处理
+**函数尾声（Epilogue）：**
 
-### 错误类型
-
-lexer 主要识别以下语法错误：
-
-- **a: 非法符号** :出现未定义的Token,比如&或者|
-
-## 文档补充
-
-做到语义分析的时候，我预想的流式编译器设计似乎行不通了,想要实现分析到哪里
-就报错到哪里，这样错误也不用排序.
-
-并且之前是没有做输出的开关的，语义分析需要关闭，因此又做了一个极其简单
-的开关来控制输出
-
-# LCC 编译器 - Parser 设计文档
-
-## 概述
-
-Parser（语法分析器）是 LCC 编译器的第二个阶段，负责将 Lexer 生成的 Token 流转换为抽象语法树（AST）。本文档详细介绍了 Parser 的设计架构、实现细节和使用方式。
-
-## 架构设计
-
-### 类结构
-
-```cpp
-/**
- * @class Parser
- * @brief a class to parse tokens into an AST
- *
- */
-class Parser {
-private:
-  /**
-   * @brief lexer for parser to get tokens
-   */
-  Lexer lexer;
-  /**
-   * @brief current token being processed and output
-   */
-  Token current;
-  /**
-   * @brief the last line number of a non-terminal being processed
-   */
-  int lastVnline = 0;
-
-  /**
-   * @brief the output enabled flag
-   */
-  bool outputEnabled = false;
-  /**
-   * @brief to the next token
-   */
-  void advance();
-  /**
-   * @brief a function to check whether the next token is in the expected set
-   *
-   * @param types expected token types
-   * @param errorType if not matched, report this error type
-   * @return if matched, return true and advance to the next token; else report
-   * the error and return false
-   */
-  bool expect(const std::vector<TokenType> &types,
-              const std::string &errorType);
-  inline static int silentDepth = 0;
-
-public:
-  /**
-   * @brief a function to report an error
-   *
-   * @param line report line number
-   * @param errorType report error type
-   */
-  void error(const int &line, const std::string errorType);
-  /**
-   * @brief a constructor of Parser
-   *
-   * @param lexer lexer to get stream of tokens
-   * @param current the first token from lexer
-   */
-  explicit Parser(Lexer &&lexer, Token current);
-  /**
-   * @brief a function to control whether to output the parse tree
-   *
-   * @param silent whether to silent the output
-   */
-  void silentPV(bool silent);
-  /**
-   * @brief output the current non-terminal being processed
-   *
-   * @param type the output non-terminal
-   */
-  void output(const std::string &type);
-  // 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
-  std::unique_ptr<CompUnit> parseCompUnit();
-
-private:
-  std::unique_ptr<IfStmt> parseIfStmt();
-  std::unique_ptr<ForStmt> parseForStmt();
-  std::unique_ptr<BreakStmt> parseBreakStmt();
-  std::unique_ptr<ContinueStmt> parseContinueStmt();
-  std::unique_ptr<ReturnStmt> parseReturnStmt();
-  std::unique_ptr<PrintfStmt> parsePrintfStmt();
-  std::unique_ptr<AssignStmt> parseAssignStmt();
-  std::unique_ptr<ExpStmt> parseExpStmt();
-  std::unique_ptr<BlockStmt> parseBlockStmt();
-
-private:
-  // 声明 Decl → ConstDecl | VarDecl
-  std::unique_ptr<Decl> parseDecl();
-
-  // 常量声明 ConstDecl → 'const' BType ConstDef { ',' ConstDef } ';'
-  std::unique_ptr<ConstDecl> parseConstDecl();
-
-  // 变量声明 VarDecl → [ 'static' ] BType VarDef { ',' VarDef } ';'
-  std::unique_ptr<VarDecl> parseVarDecl();
-
-  // 基本类型 BType → 'int'
-  std::unique_ptr<BType> parseBType();
-
-  // 常量定义 ConstDef → Ident [ '[' ConstExp ']' ] '=' ConstInitVal
-  std::unique_ptr<ConstDef> parseConstDef();
-
-  // 变量定义 VarDef → Ident [ '[' ConstExp ']' ] | Ident [ '[' ConstExp ']' ]
-  // '=' InitVal
-  std::unique_ptr<VarDef> parseVarDef();
-
-  // 常量初值 ConstInitVal → ConstExp | '{' [ ConstExp { ',' ConstExp } ] '}'
-  std::unique_ptr<ConstInitVal> parseConstInitVal();
-
-  // 变量初值 InitVal → Exp | '{' [ Exp { ',' Exp } ] '}'
-  std::unique_ptr<InitVal> parseInitVal();
-
-  // 函数定义 FuncDef → FuncType Ident '(' [FuncFParams] ')' Block
-  std::unique_ptr<FuncDef> parseFuncDef();
-
-  // 主函数定义 MainFuncDef → 'int' 'main' '(' ')' Block
-  std::unique_ptr<MainFuncDef> parseMainFuncDef();
-
-  // 函数类型 FuncType → 'void' | 'int'
-  std::unique_ptr<FuncType> parseFuncType();
-
-  // 函数形参表 FuncFParams → FuncFParam { ',' FuncFParam }
-  std::unique_ptr<FuncFParams> parseFuncFParams();
-
-  // 函数形参 FuncFParam → BType Ident ['[' ']']
-  std::unique_ptr<FuncFParam> parseFuncFParam();
-
-  // 语句块 Block → '{' { BlockItem } '}'
-  std::unique_ptr<Block> parseBlock();
-
-  // 语句块项 BlockItem → Decl | Stmt
-  std::unique_ptr<BlockItem> parseBlockItem();
-
-  // 语句 Stmt → LVal '=' Exp ';'
-  //   | [Exp] ';'
-  //   | Block
-  //   | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
-  //   | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt
-  //   | 'break' ';' | 'continue' ';'
-  //   | 'return' [Exp] ';'
-  //   | 'printf''('StringConst {','Exp}')'';'
-  std::unique_ptr<Stmt> parseStmt();
-
-  // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp }
-  std::unique_ptr<ForAssignStmt> parseForAssignStmt();
-
-  // 表达式 Exp → AddExp
-  std::unique_ptr<Exp> parseExp();
-
-  // 条件表达式 Cond → LOrExp
-  std::unique_ptr<Cond> parseCond();
-
-  // 左值表达式 LVal → Ident ['[' Exp ']']
-  std::unique_ptr<LVal> parseLVal();
-
-  // 基本表达式 PrimaryExp → '(' Exp ')' | LVal | Number
-  std::unique_ptr<PrimaryExp> parsePrimaryExp();
-
-  // 数值 Number → IntConst
-  std::unique_ptr<Number> parseNumber();
-
-  // 一元表达式 UnaryExp → PrimaryExp | Ident '(' [FuncRParams] ')' | UnaryOp
-  // UnaryExp
-  std::unique_ptr<UnaryExp> parseUnaryExp();
-
-  // 单目运算符 UnaryOp → '+' | '−' | '!'
-  std::unique_ptr<UnaryOp> parseUnaryOp();
-
-  // 函数实参表达式 FuncRParams → Exp { ',' Exp }
-  std::unique_ptr<FuncRParams> parseFuncRParams();
-
-  // 乘除模表达式 MulExp → UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
-  std::unique_ptr<MulExp> parseMulExp();
-
-  // 加减表达式 AddExp → MulExp | AddExp ('+' | '−') MulExp
-  std::unique_ptr<AddExp> parseAddExp();
-
-  // 关系表达式 RelExp → AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
-  std::unique_ptr<RelExp> parseRelExp();
-
-  // 相等性表达式 EqExp → RelExp | EqExp ('==' | '!=') RelExp
-  std::unique_ptr<EqExp> parseEqExp();
-
-  // 逻辑与表达式 LAndExp → EqExp | LAndExp '&&' EqExp
-  std::unique_ptr<LAndExp> parseLAndExp();
-
-  // 逻辑或表达式 LOrExp → LAndExp | LOrExp '||' LAndExp
-  std::unique_ptr<LOrExp> parseLOrExp();
-
-  // 常量表达式 ConstExp → AddExp
-  std::unique_ptr<ConstExp> parseConstExp();
-};
+```mips
+function_END:
+    # 1. 恢复 $ra 和 $fp
+    lw $ra, 0($fp)
+    lw $fp, 4($fp)
+    
+    # 2. 恢复栈指针
+    addiu $sp, $sp, frameSize
+    
+    # 3. 返回
+    jr $ra
 ```
 
-## 实现细节
-
-### AST 节点设计
-
-使用继承体系构建 AST，所有节点都继承自 `ASTNode` 基类：
-
-```cpp
-class ASTNode {
-public:
-  virtual ~ASTNode() = default;
-  int line = 0;  // 记录源代码行号
-};
-```
-
-### 递归下降解析策略
-
-1. **自顶向下解析**：从文法开始符号 `CompUnit` 开始，递归调用各子解析函数
-2. **前向查看**：使用 `lexer.peekToken(1)` 进行单 Token 前瞻，避免回溯
-3. **左递归消除**：将左递归文法转换为右递归，适合递归下降解析
+**对齐要求**：栈帧大小向上取整到8字节对齐。
 
-### 错误处理机制
-
-#### 期望检查（Expect）
+---
 
-```cpp
-bool Parser::expect(const std::vector<TokenType> &types, const std::string &errorType) {
-  // 检查当前 Token 是否在期望的类型列表中
-  // 如果不匹配，报告错误并返回 false
-  // 如果匹配，消耗 Token 并返回 true
-}
-```
+## 7. 错误处理机制
 
-### 静默模式
+### 7.1 统一错误管理
 
-与 Lexer 类似，Parser 也实现了静默模式机制：
+**ErrorReporter单例模式**：
 
-```cpp
-void Parser::silentPV(bool silent) {
-  if (silent) {
-    silentDepth++;
-    lexer.silentPV(true);
-  } else {
-    silentDepth > 0 ? silentDepth-- : silentDepth = 0;
-    lexer.silentPV(false);
-  }
-}
-```
+- 各阶段通过 `ErrorReporter::getInstance().addError()` 报告错误
+- 错误信息包含行号和错误类型
+- 最终统一按行号排序输出到 `error.txt`
 
-静默模式用于：
+**设计理由**：
 
-- 解析过程中的临时分析
-- 错误恢复期间的 Token 跳过
-- 前瞻性解析时的临时禁用输出
+- 统一管理避免错误信息分散
+- 延迟输出支持错误排序和去重
+- 单例模式保证全局唯一的错误收集器
 
-## 解析流程
+### 7.2 错误分类
 
-### 主流程
+| 阶段     | 错误类型           | 错误代码 | 示例 |
+|----------|-------------------|---------|------|
+| 词法分析 | 非法符号           | a       | `@`, `#` |
+| 语法分析 | 缺少分号           | i       | `int x` |
+| 语法分析 | 缺少右括号 `)`     | j       | `if (x > 0 {` |
+| 语法分析 | 缺少右括号 `]`     | k       | `arr[0 = 1;` |
+| 语义分析 | 标识符重定义       | b       | `int x; int x;` |
+| 语义分析 | 标识符未定义       | c       | `y = x;`（x未定义）|
+| 语义分析 | 函数参数数量不匹配 | d       | `foo(1)`（期望2个）|
+| 语义分析 | 函数参数类型不匹配 | e       | `foo(arr)`（期望标量）|
+| 语义分析 | void函数返回值错误 | f       | `void f() { return 1; }` |
+| 语义分析 | 缺少返回语句       | g       | `int f() { }`（无return）|
+| 语义分析 | 常量赋值           | h       | `const int x=1; x=2;` |
+| 语义分析 | printf参数不匹配   | l       | `printf("%d%d", x)`（缺一个）|
+| 语义分析 | break/continue错误 | m       | `if (x) break;` |
 
-1. **初始化**：构造 Parser 对象，传入 Lexer 和初始 Token
-2. **解析编译单元**：调用 `parseCompUnit()` 开始解析
-3. **递归解析**：根据当前 Token 类型调用相应的解析函数
-4. **构建 AST**：每个解析函数返回对应的 AST 节点
-5. **错误处理**：遇到语法错误时报告并尝试恢复
-6. **输出结果**：输出语法分析结果的产生式
+---
 
-### 语句解析策略
+## 11. 参考文档
 
-由于部分语句存在二义性（如标识符开头的可能是赋值语句或表达式语句），Parser 采用以下策略向前看，并在这个过程中
-启动静默模式以避免不必要的输出，判断出要解析的语句类型后再恢复状态，按正确的语句类型进行解析：
-
-```cpp
-if (current.type == TokenType::IDENFR) {
-  // 临时保存状态
-  auto temp = lexer;
-  auto tempCurrent = current;
-  silentPV(true);
-
-  // 尝试解析左值
-  parseLVal();
-  advance();
-
-  // 检查是否为赋值操作
-  if (current.type == TokenType::ASSIGN) {
-    // 恢复状态，按赋值语句解析
-    lexer = temp;
-    current = tempCurrent;
-    silentPV(false);
-    return parseAssignStmt();
-  } else {
-    // 恢复状态，按表达式语句解析
-    lexer = temp;
-    current = tempCurrent;
-    silentPV(false);
-    return parseExpStmt();
-  }
-}
-```
-
-## 错误处理
-
-### 错误类型
-
-Parser 主要识别以下语法错误：
-
-- **i 类型错误**：缺少分号
-- **j 类型错误**： 缺少右括号')'
-- **k 类型错误**：缺少右中括号']'
-
-## 与其他组件的交互
-
-### 与 Lexer 的交互
-
-- **Token 获取**：通过 `lexer.nextToken()` 获取下一个 Token
-- **前向查看**：通过 `lexer.peekToken(n)` 查看第 n 个未来的 Token
-- **静默同步**：通过 `silentPV()` 方法与 Lexer 的静默模式同步
-
-## 文档补充
-
-做到语义分析的时候，我预想的流式编译器设计似乎行不通了,还是需要扫描
-完整的AST树，因为在做Parser的时候，我根本没有想过类型相关的东西,因此
-我在AST节点中加入了类型信息，这部分的内容由语义分析来填充。
-
-并且之前是没有做输出的开关的，语义分析需要关闭，因此又做了一个极其简单
-的开关来控制输出,另外语义分析是需要其他的信息的，比如函数名的所在行数,
-'}'的所在行数，因此AST树又补充了一点信息。
-
-# LCC 编译器 - Semantic Analyzer 设计文档
-
-## 概述
-
-Semantic Analyzer（语义分析器）是 LCC 编译器的第三个阶段，负责对 Parser 生成的 AST 进行语义分析，包括类型检查、作用域管理、函数调用验证等。本文档详细介绍了 Semantic Analyzer 的设计架构、实现细节和使用方式。
-
-## 架构设计
-
-### 类结构
-
-```cpp
-class SemanticAnalyzer {
-public:
-  SemanticAnalyzer();
-
-  void visit(CompUnit *node);
-
-private:
-  /**
-   * @brief symbol table for semantic analysis
-   */
-  SymbolTable symbolTable;
-  /**
-   * @brief the loop depth for semantic analysis
-   */
-  int loop = 0;
-  /**
-   * @brief the current function return type for checking return statements
-   */
-  TypePtr current_function_return_type = nullptr;
-
-  bool outputenabled = false;
-
-  void error(const int &line, const std::string errorType);
-
-  void visit(Decl *node);
-  void visit(ConstDecl *node);
-  void visit(VarDecl *node);
-  void visit(ConstDef *node, TypePtr type);
-  void visit(VarDef *node, TypePtr type);
-  void visit(FuncDef *node);
-  void visit(MainFuncDef *node);
-  void visit(FuncFParams *node);
-  void visit(FuncFParam *node);
-  void visit(Block *node);
-  void visit(BlockItem *node);
-
-  void visit(Stmt *node);
-  void visit(AssignStmt *node);
-  void visit(ExpStmt *node);
-  void visit(BlockStmt *node);
-  void visit(IfStmt *node);
-  void visit(ForStmt *node);
-  void visit(BreakStmt *node);
-  void visit(ContinueStmt *node);
-  void visit(ReturnStmt *node);
-  void visit(PrintfStmt *node);
-  void visit(ForAssignStmt *node);
-
-  TypePtr visit(BType *node);
-  TypePtr visit(FuncType *node);
-  void visit(ConstInitVal *node);
-  void visit(InitVal *node);
-  TypePtr visit(Exp *node);
-  TypePtr visit(Cond *node);
-  TypePtr visit(LVal *node);
-  TypePtr visit(PrimaryExp *node);
-  TypePtr visit(Number *node);
-  TypePtr visit(UnaryExp *node);
-  void visit(UnaryOp *node);
-  std::vector<TypePtr> visit(FuncRParams *node);
-  TypePtr visit(MulExp *node);
-  TypePtr visit(AddExp *node);
-  TypePtr visit(RelExp *node);
-  TypePtr visit(EqExp *node);
-  TypePtr visit(LAndExp *node);
-  TypePtr visit(LOrExp *node);
-  TypePtr visit(ConstExp *node);
-};
-```
-
-## 核心组件
-
-### 1. 类型系统
-
-#### 基础类型
-
-```cpp
-enum class BaseType { VOID, INT };
-```
-
-#### 类型分类
-
-```cpp
-enum class Category { Basic, Array, Function };
-```
-
-#### 类型类设计
-
-对类型设计了几个工厂方法，方便创建不同类型的实例,同时在语义分析过程中代码更加简洁。
-
-```cpp
-enum class BaseType { VOID, INT };
-
-class Type {
-public:
-  enum class Category { Basic, Array, Function };
-
-  Category category;
-  BaseType base_type;
-  bool is_const = false;
-  bool is_static = false;
-
-  TypePtr array_element_type;
-  int array_size = 0; // 没有用,因为这部分内容中间代码生成时就会有这个信息
-
-  TypePtr return_type;
-  std::vector<TypePtr> params;
-
-  Type(Category cat) : category(cat) {}
-
-  static TypePtr create_base_type(BaseType base, bool is_const = false,
-                                  bool is_static = false) {
-    auto type = std::make_shared<Type>(Category::Basic);
-    type->is_const = is_const;
-    type->is_static = is_static;
-    type->base_type = base;
-    return type;
-  }
-
-  static TypePtr create_array_type(TypePtr element_type, int size) {
-    auto type = std::make_shared<Type>(Category::Array);
-    type->array_element_type = element_type;
-    type->array_size = size;
-    return type;
-  }
-
-  static TypePtr create_function_type(TypePtr ret_type,
-                                      const std::vector<TypePtr> &params) {
-    auto type = std::make_shared<Type>(Category::Function);
-    type->return_type = ret_type;
-    type->params = params;
-    return type;
-  }
-  static TypePtr getIntType() { return create_base_type(BaseType::INT); }
-  static TypePtr getVoidType() { return create_base_type(BaseType::VOID); }
-};
-```
-
-### 2. 符号表（Symbol Table）
-
-#### 符号定义
-
-```cpp
-struct Symbol {
-  std::string name;
-  TypePtr type;
-  int line;
-};
-```
-
-#### 作用域管理
-
-定义了一个栈式符号表，使用了`ScopeRecord`结构体来记录每个作用域的信息,对于整个
-符号表使用`records`来存储所有作用域的`level`,使用active来存储当前活跃的所有作用域索引。
-
-**规则**：
-进入新作用域时，调用`pushScope()`，离开作用域时，调用`popScope()`。在当前作用域添加符号时，调用`addSymbol()`。查找符号时，调用`findSymbol()`，从当前作用域开始向外查找。
-
-```cpp
-class SymbolTable {
-private:
-  struct ScopeRecord {
-    int level = 0;
-    std::unordered_map<std::string, Symbol> table;
-    std::vector<std::string> order;
-  };
-
-  /**
-   * @brief records of all scopes
-   */
-  std::vector<ScopeRecord> records;
-  /**
-   * @brief current active scopes, storing indices into records
-   */
-  std::vector<size_t> active;
-  /**
-   * @brief the child scope level generator
-   */
-  int nextLevel = 1;
-
-public:
-  SymbolTable() { pushScope(); }
-
-  void pushScope() {
-    ScopeRecord rec;
-    rec.level = nextLevel++;
-    records.emplace_back(std::move(rec));
-    active.push_back(records.size() - 1);
-  }
-
-  void popScope() {
-    if (!active.empty()) {
-      active.pop_back();
-    }
-  }
-
-  bool addSymbol(const Symbol &symbol) {
-    if (active.empty())
-      return false;
-    auto &rec = records[active.back()];
-    if (rec.table.count(symbol.name))
-      return false;
-    rec.table.emplace(symbol.name, symbol);
-    rec.order.push_back(symbol.name);
-    return true;
-  }
-
-  std::optional<Symbol> findSymbol(const std::string &name) const {
-    for (auto it = active.rbegin(); it != active.rend(); ++it) {
-      const auto &rec = records[*it];
-      auto f = rec.table.find(name);
-      if (f != rec.table.end()) {
-        return f->second;
-      }
-    }
-    return std::nullopt;
-  }
-
-  void printTable() const {
-    for (const auto &rec : records) {
-      for (const auto &name : rec.order) {
-        const auto &sym = rec.table.at(name);
-        std::cout << rec.level << " " << sym.name << " " << to_string(sym.type)
-                  << std::endl;
-      }
-    }
-  }
-};
-```
-
-## 语义分析流程
-
-### 整体分析流程
-
-1. **初始化**：创建符号表，设置全局作用域
-2. **编译单元分析**：遍历所有声明、函数定义和主函数
-3. **符号表构建**：在分析过程中填充栈式符号表
-4. **类型检查**：对表达式进行类型推导和检查
-5. **控制流检查**：验证 break/continue/return 语句的正确性
-6. **输出生成**：输出符号表信息供后续阶段使用
-
-## 错误处理
-
-### 错误类型
-
-语义分析器检测以下错误类型：
-
-- **b: 重定义错误**：标识符在同一作用域内重复定义
-- **c: 未定义错误**：使用未定义的标识符
-- **d: 函数参数数量错误**：函数调用时参数数量不匹配
-- **e: 函数参数类型错误**：函数调用时参数类型不匹配
-- **f: 返回值错误**：void 函数有返回值或返回值类型不匹配
-- **g: 缺少返回语句**：有返回值的函数缺少 return 语句
-- **h: 常量赋值错误**：试图给常量赋值
-- **l: printf 参数数量不匹配**：格式字符串参数数量与实际参数不符
-- **m: 循环控制语句错误**：break/continue 不在循环内使用
-
-所有错误通过 ErrorReporter 统一收集，最后按行号排序输出。
-
-## 与其他组件的交互
-
-### 与 Parser 的交互
-
-- 接收完整的 AST 树进行遍历分析
-- 利用 AST 节点中的行号信息进行错误定位
-- 将类型信息写回 AST 节点供后端代码生成使用
+### 11.1 语言与文法
+
+- [EBNF.md](EBNF.md) - 完整的语言文法定义（BNF范式）
+
+### 11.2 前端设计
+
+- [lexer.md](lexer.md) - 词法分析器详细设计
+- [parser.md](parser.md) - 语法分析器详细设计
+- [semantic.md](semantic.md) - 语义分析器详细设计
+
+### 11.3 中间表示与后端
+
+- [IR_DESIGN.md](IR_DESIGN.md) - 中间代码详细设计（指令集、优化）
+- [REGISTER_CONVENTION.md](REGISTER_CONVENTION.md) - 寄存器约定详细说明
+
+### 11.4 错误处理
+
+- [error.md](error.md) - 错误处理机制
+- [errorReporter.md](errorReporter.md) - ErrorReporter实现
+
+---
+
+## 12. 总结
+
+### 12.1 核心设计原则
+
+1. **模块化与职责分离**：各阶段独立，接口清晰
+2. **经典算法实践**：递归下降解析、图着色寄存器分配、数据流分析
+3. **渐进式信息构建**：Token → AST → 类型化AST → IR → Assembly
+4. **简洁性优先**：非SSA形式、简单的优化策略、清晰的调用约定
+
+### 12.2 重点设计特色
+
+**IR设计**：
+
+- 四元式风格，易于理解和调试
+- 基本块组织，为优化提供基础
+- 短路求值的双模式生成
+
+**寄存器分配**：
+
+- 图着色算法的经典实现
+- 活跃性分析驱动
+- Scratch寄存器的引用计数管理
+
+**前端机制**：
+
+- 静默模式的引用计数设计
+- 试探性解析处理二义性
+- 栈式符号表的优雅实现
