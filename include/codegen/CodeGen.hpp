@@ -5,6 +5,8 @@
 #include "codegen/Instruction.hpp"
 #include "codegen/Operand.hpp"
 #include "parser/AST.hpp"
+#include "semantic/Symbol.hpp"
+#include "semantic/SymbolTable.hpp"
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -13,6 +15,7 @@
 class CodeGen {
 public:
   CodeGen() = default;
+  explicit CodeGen(const SymbolTable &symbolTable);
   ~CodeGen() = default;
 
   void generate(CompUnit *root);
@@ -68,12 +71,6 @@ private:
   Operand genLOr(LOrExp *lo);
   std::vector<Operand> genFuncRParams(FuncRParams *params);
 
-  // Alias management for function-local resolution (avoids global pollution)
-  void pushAliasScope();
-  void popAliasScope();
-  std::shared_ptr<Symbol> resolveAlias(const std::string &name) const;
-  void setAlias(const std::string &name, const std::shared_ptr<Symbol> &sym);
-
   void emit(const Instruction &inst);
   void emitGlobal(const Instruction &inst);
   Operand newTemp();
@@ -111,8 +108,6 @@ private:
    * @param name the symbol name
    * @param type the symbol type
    */
-  std::shared_ptr<Symbol> internSymbol(const std::string &name,
-                                       TypePtr type = nullptr);
 
 private:
   /**
@@ -143,11 +138,11 @@ private:
    * @brief record of constant values for variables known at compile time, e.g.
    * const int maxn = 1000
    */
-  std::unordered_map<std::string, int> constValues_;
+  std::unordered_map<std::shared_ptr<Symbol>, int> constValues_;
   /**
-   * @brief the symbol table for the current function being generated
+   * @brief reference to the frontend symbol table from semantic analysis
    */
-  std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols_;
+  const SymbolTable *symbolTable_;
   /**
    * @brief all string literal symbols
    */
@@ -164,11 +159,6 @@ private:
    * @brief record of defined global variables to avoid duplicate definitions
    */
   std::unordered_set<std::string> definedGlobals_;
-  /**
-   * @brief record of alias scopes for function-local name resolution
-   */
-  std::vector<std::unordered_map<std::string, std::shared_ptr<Symbol>>>
-      aliasStack_;
   /**
    * @class LoopContext
    * @brief current loop context for break/continue statement resolution

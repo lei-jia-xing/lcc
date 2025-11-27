@@ -17,6 +17,11 @@ public:
 
 private:
   /**
+   * @brief Initialize builtin functions (printf, getint, etc.)
+   */
+  void initializeBuiltinFunctions();
+
+  /**
    * @brief symbol table for semantic analysis
    */
   SymbolTable symbolTable;

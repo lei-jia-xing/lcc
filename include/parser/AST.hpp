@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+// Forward declaration
+struct Symbol;
+
 class ASTNode;
 class CompUnit;
 class Decl;
@@ -116,7 +119,8 @@ public:
   std::string ident;
   std::unique_ptr<ConstExp> arraySize;
   std::unique_ptr<ConstInitVal> constinitVal;
-  TypePtr type; // Populated by semantic analysis
+  TypePtr type;                   // Populated by semantic analysis
+  std::shared_ptr<Symbol> symbol; // Symbol for this definition
 };
 
 /**
@@ -130,7 +134,8 @@ public:
   std::string ident;
   std::unique_ptr<ConstExp> arraySize;
   std::unique_ptr<InitVal> initVal;
-  TypePtr type; // Populated by semantic analysis
+  TypePtr type;                   // Populated by semantic analysis
+  std::shared_ptr<Symbol> symbol; // Symbol for this definition
 };
 
 /**
@@ -214,6 +219,7 @@ public:
   int identLine = 0;
   bool isArray = false;
   TypePtr type;
+  std::shared_ptr<Symbol> symbol; // Symbol for this parameter
 };
 
 /**
@@ -224,7 +230,7 @@ public:
 class Block : public ASTNode {
 public:
   std::vector<std::unique_ptr<BlockItem>> items;
-  int closingBraceLine = 0; // 记录结束大括号'}'的行号
+  int closingBraceLine = 0;
 };
 
 /**
@@ -410,6 +416,7 @@ public:
   std::string ident;
   std::unique_ptr<Exp> arrayIndex;
   TypePtr type;
+  std::shared_ptr<Symbol> symbol; // Symbol for this reference
 };
 
 /**

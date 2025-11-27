@@ -9,29 +9,36 @@
 #include <string>
 #include <vector>
 
-/**
- * @brief 错误报告器类
- * 负责收集、排序和打印所有编译错误
- */
 class ErrorReporter {
 public:
   /**
-   * @brief 获取单例实例
+   * @brief get singleton instance of ErrorReporter
+   *
+   * @return instance reference
    */
   static ErrorReporter &getInstance();
 
   /**
-   * @brief 添加一个错误
-   * @param line 行号
-   * @param type 错误类型
+   * @brief add an error record
+   *
+   * @param line error line number
+   * @param type error type description
    */
   void addError(int line, const std::string &type);
 
   /**
-   * @brief 打印所有错误（按行号排序）
-   * @param outputStream 输出流，默认为std::cerr
+   * @brief print all errors to the given output stream
+   *
+   * @param outputStream given output stream (default: std::cerr)
    */
   void printErrors(std::ostream &outputStream = std::cerr) const;
+
+  /**
+   * @brief check if there are any errors recorded
+   *
+   * @return true if there are errors, false otherwise
+   */
+  bool hasError() const { return !errors.empty(); }
 
 private:
   ErrorReporter() = default;

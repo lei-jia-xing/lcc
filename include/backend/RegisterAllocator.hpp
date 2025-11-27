@@ -17,6 +17,7 @@ public:
   int getReg(int tempId) const;
   bool isSpilled(int tempId) const;
   const LiveSet &getSpilledNodes() const;
+  std::set<int> getUsedRegs() const;
 
 private:
   void computeUseDef(Function *func);
@@ -24,7 +25,8 @@ private:
   void buildInterferenceGraph(Function *func);
   void doColoring();
 
-  static const int NumRegs = 10;
+  // $s0-$s7
+  static const int NumRegs = 8;
 
   std::map<const BasicBlock *, LiveSet> _use;
   std::map<const BasicBlock *, LiveSet> _def;
@@ -36,5 +38,8 @@ private:
 
   std::vector<int> _nodeStack;
   std::map<int, int> _coloredNodes; // tempId -> reg index
+  /**
+   * @brief spilled nodes after coloring
+   */
   LiveSet _spilledNodes;
 };

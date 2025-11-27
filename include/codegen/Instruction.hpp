@@ -4,27 +4,28 @@
 #include <string>
 
 enum class OpCode {
-  ADD, // ADD arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  SUB, // SUB arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  MUL, // MUL arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  DIV, // DIV arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  MOD, // MOD arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  NEG, // NEG arg1(var|temp|const), -, res(temp)
+  // if we do folding, res may be const
+  ADD, // ADD arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  SUB, // SUB arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  MUL, // MUL arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  DIV, // DIV arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  MOD, // MOD arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  NEG, // NEG arg1(var|temp|const), -, res(temp|const)
 
-  EQ,  // EQ arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  NEQ, // NEQ arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  LT,  // LT arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  LE,  // LE arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  GT,  // GT arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  GE,  // GE arg1(var|temp|const), arg2(var|temp|const), res(temp)
+  EQ,  // EQ arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  NEQ, // NEQ arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  LT,  // LT arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  LE,  // LE arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  GT,  // GT arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  GE,  // GE arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
 
-  AND, // AND arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  OR,  // OR arg1(var|temp|const), arg2(var|temp|const), res(temp)
-  NOT, // NOT arg1(var|temp|const), -, res(temp)
+  AND, // AND arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  OR,  // OR arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+  NOT, // NOT arg1(var|temp|const), -, res(temp|const)
 
-  ASSIGN, // ASSIGN src(var|temp|const), -, dst(var)
+  ASSIGN, // ASSIGN src(var|temp|const), -, dst(var|temp)
 
-  LOAD,  // LOAD base(var), index(var|temp|const), dst(temp)
+  LOAD,  // LOAD base(var), [index(var|temp|const)], dst(var|temp)
   STORE, // STORE value(var|temp|const), base(var), index(var|temp|const)
 
   IF,    // IF cond(var|temp|const), -, res(label)
@@ -33,7 +34,7 @@ enum class OpCode {
 
   PARAM,  // PARAM idx(const), -, var(var)          function def
   ARG,    // ARG arg(var|const|temp), -, -          function call
-  CALL,   // CALL argCount(const), func(label), res(temp)
+  CALL,   // CALL argc(const), func(label), res(temp)
   RETURN, // RETURN -, -, res(var|temp|const)
 
   ALLOCA // ALLOCA var(var), -, size(var|temp|const)

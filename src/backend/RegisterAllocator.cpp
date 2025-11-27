@@ -32,6 +32,14 @@ const RegisterAllocator::LiveSet &RegisterAllocator::getSpilledNodes() const {
   return _spilledNodes;
 }
 
+std::set<int> RegisterAllocator::getUsedRegs() const {
+  std::set<int> usedRegs;
+  for (const auto &pair : _coloredNodes) {
+    usedRegs.insert(pair.second);
+  }
+  return usedRegs;
+}
+
 void RegisterAllocator::computeUseDef(Function *func) {
   _temps.clear();
   for (auto &block : func->getBlocks()) {

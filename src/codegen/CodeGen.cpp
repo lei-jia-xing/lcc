@@ -5,13 +5,14 @@
 #include "semantic/Symbol.hpp"
 #include <iostream>
 
+CodeGen::CodeGen(const SymbolTable &symbolTable) : symbolTable_(&symbolTable) {}
+
 void CodeGen::reset() {
   ctx_.func = nullptr;
   ctx_.curBlk.reset();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
   constValues_.clear();
-  symbols_.clear();
   stringLiterals_.clear();
   nextStringId_ = 0;
   globalsIR_.clear();
@@ -64,15 +65,16 @@ bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
   case PrimaryExp::PrimaryType::EXP:
     return tryEvalExp(pe->exp.get(), outVal);
   case PrimaryExp::PrimaryType::LVAL:
+    // Try to evaluate constant variable
     if (pe->lval) {
-      std::shared_ptr<Symbol> aliasSym = resolveAlias(pe->lval->ident);
-      if (aliasSym && aliasSym->type && !aliasSym->type->is_const) {
-        return false;
-      }
-      auto it = constValues_.find(pe->lval->ident);
-      if (it != constValues_.end()) {
-        outVal = it->second;
-        return true;
+      std::shared_ptr<Symbol> sym =
+          pe->lval->symbol; // Use symbol from AST node
+      if (sym && sym->type && sym->type->is_const) {
+        auto it = constValues_.find(sym);
+        if (it != constValues_.end()) {
+          outVal = it->second;
+          return true;
+        }
       }
     }
     return false;
@@ -274,27 +276,6 @@ void CodeGen::emitGlobal(const Instruction &inst) {
   globalsIR_.push_back(inst);
 }
 
-void CodeGen::pushAliasScope() { aliasStack_.emplace_back(); }
-void CodeGen::popAliasScope() {
-  if (!aliasStack_.empty())
-    aliasStack_.pop_back();
-}
-std::shared_ptr<Symbol> CodeGen::resolveAlias(const std::string &name) const {
-  for (int i = aliasStack_.size() - 1; i >= 0; --i) {
-    const auto &m = aliasStack_[i];
-    auto it = m.find(name);
-    if (it != m.end())
-      return it->second;
-  }
-  return nullptr;
-}
-void CodeGen::setAlias(const std::string &name,
-                       const std::shared_ptr<Symbol> &sym) {
-  if (aliasStack_.empty())
-    aliasStack_.emplace_back();
-  aliasStack_.back()[name] = sym;
-}
-
 void CodeGen::genFunction(FuncDef *funcDef) {
   if (!funcDef)
     return;
@@ -310,18 +291,17 @@ void CodeGen::genFunction(FuncDef *funcDef) {
   ctx_.func = funcPtr.get();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
-  symbols_.clear();
 
   ctx_.curBlk = funcPtr->createBlock();
-  // Clear alias stack for a fresh function scope
-  aliasStack_.clear();
 
   if (funcDef->params) {
     int idx = 0;
     for (auto &p : funcDef->params->params) {
-      auto sym = internSymbol(p->ident, p->type);
-      emit(Instruction(OpCode::PARAM, Operand::ConstantInt(idx),
-                       Operand::Variable(sym)));
+      auto sym = p->symbol; // Use symbol from AST node
+      if (sym) {
+        emit(Instruction::MakeParam(Operand::ConstantInt(idx),
+                                    Operand::Variable(sym)));
+      }
       idx++;
     }
   }
@@ -354,10 +334,8 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
   ctx_.func = funcPtr.get();
   ctx_.nextTempId = 0;
   ctx_.nextLabelId = 0;
-  symbols_.clear();
 
   ctx_.curBlk = funcPtr->createBlock();
-  aliasStack_.clear();
 
   if (mainDef->block) {
     genBlock(mainDef->block.get());
@@ -378,13 +356,11 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
 void CodeGen::genBlock(Block *block) {
   if (!block)
     return;
-  pushAliasScope();
   for (auto &item : block->items) {
     if (item) {
       genBlockItem(item.get());
     }
   }
-  popAliasScope();
 }
 
 void CodeGen::genBlockItem(BlockItem *item) {
@@ -440,8 +416,7 @@ void CodeGen::genAssign(AssignStmt *stmt) {
   Operand baseOrValue = genLVal(stmt->lval.get(), &idx);
   Operand rhs = genExp(stmt->exp.get());
   if (idx.getType() != OperandType::Empty) {
-    std::shared_ptr<Symbol> aliasSym = resolveAlias(stmt->lval->ident);
-    auto sym = aliasSym ? aliasSym : internSymbol(stmt->lval->ident);
+    auto sym = stmt->lval->symbol; // Use symbol from AST node
     emit(Instruction::MakeStore(rhs, Operand::Variable(sym), idx));
   } else {
     emit(Instruction::MakeAssign(rhs, baseOrValue));
@@ -554,13 +529,14 @@ void CodeGen::genPrintf(PrintfStmt *stmt) {
   for (auto &e : stmt->args) {
     vals.push_back(genExp(e.get()));
   }
-  emit(Instruction(OpCode::PARAM, Operand::Variable(fmtSym), Operand()));
+  emit(Instruction::MakeArg(Operand::Variable(fmtSym)));
   int argc = 1;
   for (auto &v : vals) {
-    emit(Instruction(OpCode::PARAM, v, Operand()));
+    emit(Instruction::MakeArg(v));
     argc++;
   }
-  Operand fnSym = Operand::Variable(internSymbol("printf"));
+  auto printfSym = symbolTable_->findSymbol("printf");
+  Operand fnSym = Operand::Variable(printfSym);
   Operand ret = newTemp();
   emit(Instruction::MakeCall(fnSym, argc, ret));
 }
@@ -575,6 +551,7 @@ void CodeGen::genForAssign(ForAssignStmt *stmt) {
     if (idx.getType() == OperandType::Empty) {
       emit(Instruction::MakeAssign(rhs, lhs));
     } else {
+      // arrary
       emit(Instruction::MakeStore(rhs, lhs, idx));
     }
   }
@@ -611,15 +588,11 @@ void CodeGen::genVarDecl(VarDecl *decl) {
 void CodeGen::genConstDef(ConstDef *def) {
   if (!def)
     return;
-  std::shared_ptr<Symbol> sym;
-  if (!ctx_.func) {
-    // global variable
-    sym = internSymbol(def->ident, def->type);
-  } else {
-    // local varibale shadowing
-    sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
-    setAlias(def->ident, sym);
+  auto sym = def->symbol; // Use symbol from AST node
+  if (!sym) {
+    return;
   }
+
   // size alloca, default to 1 word
   Operand sizeOp = Operand::ConstantInt(1);
   if (def->arraySize) {
@@ -634,6 +607,11 @@ void CodeGen::genConstDef(ConstDef *def) {
 void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   if (!def)
     return;
+  auto sym = def->symbol; // Use symbol from AST node
+  if (!sym) {
+    return;
+  }
+
   int sizeInt = 1;
   if (def->arraySize) {
     Operand sz = genConstExp(def->arraySize.get());
@@ -645,41 +623,31 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
     std::string gname = "_S_" +
                         (ctx_.func ? ctx_.func->getName() : std::string("fn")) +
                         "_" + def->ident;
-    auto gsym = internSymbol(gname, def->type);
-    // variable shadowing
-    setAlias(def->ident, gsym);
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
       // static variable store in .data
-      emitGlobal(Instruction::MakeAlloca(Operand::Variable(gsym),
+      emitGlobal(Instruction::MakeAlloca(Operand::Variable(sym),
                                          Operand::ConstantInt(sizeInt)));
     }
     if (def->initVal) {
-      Operand var = Operand::Variable(gsym);
       if (!def->initVal->isArray) {
         if (def->initVal->exp) {
           Operand v = genExp(def->initVal->exp.get());
-          emit(Instruction::MakeAssign(v, var));
+          emit(Instruction::MakeAssign(v, Operand::Variable(sym)));
         }
       } else {
         for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
           auto &e = def->initVal->arrayExps[i];
           Operand v = genExp(e.get());
           emit(Instruction::MakeStore(
-              v, var, Operand::ConstantInt(static_cast<int>(i))));
+              v, Operand::Variable(sym),
+              Operand::ConstantInt(static_cast<int>(i))));
         }
       }
     }
     return;
   }
 
-  std::shared_ptr<Symbol> sym;
-  if (!ctx_.func) {
-    sym = internSymbol(def->ident, def->type);
-  } else {
-    sym = std::make_shared<Symbol>(def->ident, def->type, def->line);
-    setAlias(def->ident, sym);
-  }
   emit(Instruction::MakeAlloca(Operand::Variable(sym),
                                Operand::ConstantInt(sizeInt)));
   if (def->initVal) {
@@ -695,7 +663,7 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
   if (!init->isArray) {
     Operand v = genConstExp(init->exp.get());
     if (v.getType() == OperandType::ConstantInt) {
-      constValues_[sym->name] = v.asInt();
+      constValues_[sym] = v.asInt();
     }
     emit(Instruction::MakeAssign(v, var));
     return;
@@ -715,17 +683,8 @@ void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
   if (!init->isArray) {
     if (init->exp) {
       int constValue = 0;
-      if (sym->type && sym->type->is_const &&
-          tryEvalConst(init->exp->addExp.get(), constValue)) {
-        // compile-time eval
-        Operand v = Operand::ConstantInt(constValue);
-        emit(Instruction::MakeAssign(v, var));
-        constValues_[sym->name] = constValue;
-      } else {
-        // runtime eval
-        Operand v = genExp(init->exp.get());
-        emit(Instruction::MakeAssign(v, var));
-      }
+      Operand v = genExp(init->exp.get());
+      emit(Instruction::MakeAssign(v, var));
     }
     return;
   }
@@ -758,10 +717,22 @@ void CodeGen::genCond(Cond *cond, int tLbl, int fLbl) {
 Operand CodeGen::genLVal(LVal *lval, Operand *index) {
   if (!lval)
     return Operand();
-  std::shared_ptr<Symbol> aliasSym = resolveAlias(lval->ident);
-  auto sym = aliasSym ? aliasSym : internSymbol(lval->ident);
+  auto sym = lval->symbol; // Use symbol from AST node
+  if (!sym) {
+    return Operand();
+  }
+
   Operand base = Operand::Variable(sym);
   if (!lval->arrayIndex) {
+    if (lval->type && lval->type->is_const) {
+      // is const rvalue, because const should not be lvalue
+      auto it = constValues_.find(sym);
+      if (it != constValues_.end()) {
+        if (index)
+          *index = Operand();
+        return Operand::ConstantInt(it->second);
+      }
+    }
     if (lval->type && lval->type->category == Type::Category::Array) {
       if (!index) { // is rvalue, as caller param
         Operand addr = newTemp();
@@ -769,6 +740,7 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
         emit(Instruction::MakeLoad(base, Operand(), addr));
         return addr;
       }
+      // otherwise is lvalue, return base
     }
     // variable
     if (index)
@@ -779,10 +751,11 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
   Operand idx = genExp(lval->arrayIndex.get());
   if (index)
     *index = idx;
-  Operand dst = newTemp();
+  Operand dst = newTemp(); // pass by value
   emit(Instruction::MakeLoad(base, idx, dst));
   return dst;
 }
+
 Operand CodeGen::genPrimary(PrimaryExp *pe) {
   if (!pe)
     return Operand();
@@ -812,14 +785,15 @@ Operand CodeGen::genUnary(UnaryExp *ue) {
   case UnaryExp::UnaryType::PRIMARY:
     return genPrimary(ue->primaryExp.get());
   case UnaryExp::UnaryType::FUNC_CALL: {
-    Operand func = Operand::Variable(internSymbol(ue->funcIdent));
+    auto funcSym = symbolTable_->findSymbol(ue->funcIdent);
+    Operand func = Operand::Variable(funcSym);
     std::vector<Operand> args;
     if (ue->funcRParams) {
       args = genFuncRParams(ue->funcRParams.get());
     }
 
     for (size_t i = 0; i < args.size(); i++) {
-      emit(Instruction(OpCode::PARAM, args[i], Operand()));
+      emit(Instruction::MakeArg(args[i]));
     }
 
     Operand result = newTemp();
@@ -965,6 +939,9 @@ Operand CodeGen::genLAnd(LAndExp *la) {
   int cv;
   if (tryEvalConst(la, cv))
     return Operand::ConstantInt(cv);
+  if (la->op == LAndExp::OpType::NONE) {
+    return genEq(la->eqExp.get());
+  }
 
   Operand result = newTemp();
   emit(Instruction::MakeAssign(Operand::ConstantInt(0), result));
@@ -986,6 +963,9 @@ Operand CodeGen::genLOr(LOrExp *lo) {
   int cv;
   if (tryEvalConst(lo, cv))
     return Operand::ConstantInt(cv);
+  if (lo->op == LOrExp::OpType::NONE) {
+    return genLAnd(lo->lAndExp.get());
+  }
 
   Operand result = newTemp();
   emit(Instruction::MakeAssign(Operand::ConstantInt(0), result));
@@ -1012,18 +992,6 @@ std::vector<Operand> CodeGen::genFuncRParams(FuncRParams *params) {
   }
 
   return args;
-}
-
-std::shared_ptr<Symbol> CodeGen::internSymbol(const std::string &name,
-                                              TypePtr type) {
-  auto it = symbols_.find(name);
-  if (it != symbols_.end())
-    return it->second;
-
-  auto sym =
-      std::make_shared<Symbol>(name, type, 0); // lineno is unnecessary here
-  symbols_[name] = sym;
-  return sym;
 }
 
 void CodeGen::branchLAndForCond(LAndExp *node, int trueLbl, int falseLbl) {

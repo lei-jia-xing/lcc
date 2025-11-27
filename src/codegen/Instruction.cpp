@@ -125,7 +125,7 @@ Instruction Instruction::MakeGoto(const Operand &label) {
 Instruction Instruction::MakeLabel(const Operand &label) {
   return Instruction(OpCode::LABEL, label);
 }
-Instrunction Instruction::MakeParam(const Operand &idx, const Operand &var) {
+Instruction Instruction::MakeParam(const Operand &idx, const Operand &var) {
   return Instruction(OpCode::PARAM, idx, var);
 }
 Instruction Instruction::MakeArg(const Operand &arg) {
