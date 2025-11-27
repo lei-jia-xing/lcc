@@ -9,6 +9,12 @@ public:
 
   void visit(CompUnit *node);
 
+  /**
+   * @brief Get the symbol table after semantic analysis
+   * @return reference to the symbol table
+   */
+  const SymbolTable& getSymbolTable() const { return symbolTable; }
+
 private:
   /**
    * @brief symbol table for semantic analysis
