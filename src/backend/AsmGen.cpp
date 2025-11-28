@@ -253,6 +253,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 
   _regAllocator.run(const_cast<Function *>(func));
 
+  std::vector<int> calleeSavedRegs;
+  const std::set<int> &usedRegs = _regAllocator.getUsedRegs();
+  for (int r : usedRegs) {
+    calleeSavedRegs.push_back(r);
+  }
+
   int spillBaseOffset = frameSize_;
   const auto &spilled = _regAllocator.getSpilledNodes();
   for (int tempId : spilled) {
@@ -260,6 +266,10 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     spillBaseOffset += 4;
   }
   frameSize_ = spillBaseOffset;
+
+  int savedRegSize = calleeSavedRegs.size() * 4;
+  frameSize_ += savedRegSize;
+
   int rem = frameSize_ % 8;
   if (rem != 0)
     // allign to 8 bytes
@@ -276,6 +286,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   out << "  sw $ra, 0($sp)\n";
   out << "  sw $fp, 4($sp)\n";
+
+  for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
+    int regId = calleeSavedRegs[i];
+    int offset = 8 + i * 4;
+    out << "  sw " << regs_[regId].name << ", " << offset << "($sp)\n";
+  }
   out << "  move $fp, $sp\n";
 
   static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
@@ -298,20 +314,13 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     int offLocal = it->second.offset;
 
     int offCaller =
-        frameSize_ + 8 +
-        (i - 4) * 4; // jump out current frame and the pre frame's $ra & $fp
+        frameSize_ + (i - 4) * 4; // jump out current frame to the previous
+                                  // frame's stack to get extra params
     std::string tempReg = allocateScratch();
     out << "  lw " << tempReg << ", " << offCaller << "($fp)\n";
     out << "  sw " << tempReg << ", " << offLocal << "($fp)\n";
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
-
-  // global variable is evaluated in compile time, no need to emit here
-  if (func->getName() == "main") {
-    for (auto *inst : curMod_->globals) {
-      lowerInstruction(inst, out);
-    }
-  }
 
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
@@ -319,6 +328,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     }
   }
   out << currentEpilogueLabel_ << ":\n";
+  for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
+    int regId = calleeSavedRegs[i];
+    int offset = 8 + i * 4;
+    out << "  lw " << regs_[regId].name << ", " << offset << "($sp)\n";
+  }
+
   out << "  lw $ra, 0($fp)\n";
   out << "  lw $fp, 4($fp)\n";
   if (frameSize_ > 32767) {
@@ -371,6 +386,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       out << "  sw " << reg << ", " << _spillOffsets[tempId] << "($fp)\n";
     }
   };
+  auto getResultReg = [&](const Operand &r) -> std::string {
+    if (isTemp(r) && !_regAllocator.isSpilled(r.asInt())) {
+      return regForTemp(r.asInt());
+    }
+    return allocateScratch();
+  };
 
   switch (op) {
   case OpCode::LABEL: {
@@ -393,7 +414,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::ASSIGN: {
     // ASSIGN src(var|temp|const), -, dst(var|temp)
     if (isTemp(res)) {
-      std::string dst = regForTemp(res.asInt());
+      std::string dst = getResultReg(res);
       if (isConst(a1)) {
         out << "  li " << dst << ", " << a1.asInt() << "\n";
       } else {
@@ -415,12 +436,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
     std::string rb = getRegister(a2, out);
-    std::string rd;
-    if (isTemp(res)) {
-      rd = regForTemp(res.asInt());
-    } else {
-      rd = allocateScratch();
-    }
+    std::string rd = getResultReg(res);
 
     switch (op) {
     case OpCode::ADD:
@@ -452,12 +468,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::NEG: {
     // NEG arg1(var|temp|const), -, res(temp|const)
     std::string ra = getRegister(a1, out);
-    std::string rd;
-    if (isTemp(res)) {
-      rd = regForTemp(res.asInt());
-    } else {
-      rd = allocateScratch();
-    }
+    std::string rd = getResultReg(res);
     out << "  subu " << rd << ", $zero, " << ra << "\n";
 
     if (isTemp(res)) {
@@ -474,13 +485,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::GE: {
     std::string ra = getRegister(a1, out);
     std::string rb = getRegister(a2, out);
-    // Determine result register and track if it's scratch-allocated
-    std::string rd;
-    if (isTemp(res) && !_regAllocator.isSpilled(res.asInt())) {
-      rd = regForTemp(res.asInt());
-    } else {
-      rd = allocateScratch();
-    }
+    std::string rd = getResultReg(res);
     switch (op) {
     case OpCode::LT:
       out << "  slt " << rd << ", " << ra << ", " << rb << "\n";
@@ -525,12 +530,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::NOT: {
     // NOT arg1(var|temp|const), -, res(temp,const)
     std::string ra = getRegister(a1, out);
-    std::string rd;
-    if (isTemp(res)) {
-      rd = regForTemp(res.asInt());
-    } else {
-      rd = allocateScratch();
-    }
+    std::string rd = getResultReg(res);
     out << "  sltiu " << rd << ", " << ra << ", 1\n";
 
     // Store result if needed
@@ -546,12 +546,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string ra = getRegister(a1, out);
     std::string rb = getRegister(a2, out);
 
-    std::string rd;
-    if (isTemp(res)) {
-      rd = regForTemp(res.asInt());
-    } else {
-      rd = allocateScratch();
-    }
+    std::string rd = getResultReg(res);
 
     out << "  sltu " << rd << ", $zero, " << ra << "\n";
     std::string rt = allocateScratch();
@@ -604,7 +599,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       baseReg = getRegister(a1, out);
     }
 
-    std::string dstReg = getRegister(res, out);
+    std::string dstReg = getResultReg(res);
 
     if (isEmpty(a2)) {
       bool isArrary = baseSym && baseSym->type &&
@@ -730,23 +725,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   }
   case OpCode::CALL: {
     // CALL argc(const), func(label), res(temp)
-    // Only save callee-saved registers that are actually used
-    std::set<int> usedRegs = _regAllocator.getUsedRegs();
-    std::vector<int> regsToSave;
-    for (int regIdx : usedRegs) {
-      if (regIdx >= 0 && regIdx < NUM_ALLOCATABLE_REGS) {
-        regsToSave.push_back(regIdx);
-      }
-    }
-
-    int saveSize = regsToSave.size() * 4;
-    if (saveSize > 0) {
-      out << "  addiu $sp, $sp, -" << saveSize << "\n";
-      for (size_t j = 0; j < regsToSave.size(); ++j) {
-        int regIdx = regsToSave[j];
-        out << "  sw " << regs_[regIdx].name << ", " << (j * 4) << "($sp)\n";
-      }
-    }
 
     // Push extra arguments (beyond $a0-$a3) onto stack
     int extraCount = pendingExtraArgs_.size();
@@ -770,18 +748,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       pendingExtraArgs_.clear();
     }
 
-    // Restore callee-saved registers
-    if (saveSize > 0) {
-      for (size_t j = 0; j < regsToSave.size(); ++j) {
-        int regIdx = regsToSave[j];
-        out << "  lw " << regs_[regIdx].name << ", " << (j * 4) << "($sp)\n";
-      }
-      out << "  addiu $sp, $sp, " << saveSize << "\n";
-    }
-
-    // Store return value if needed
     if (isTemp(res)) {
-      std::string returnReg = regForTemp(res.asInt());
+      std::string returnReg = getResultReg(res);
       out << "  move " << returnReg << ", $v0\n";
       storeToSpill(res.asInt(), returnReg);
     }
@@ -948,6 +916,7 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
         out << "  li " << addrReg << ", " << off << "\n";
         out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
         out << "  sw " << reg << ", 0(" << addrReg << ")\n";
+        releaseScratch(addrReg);
       }
     } else {
       // Store to global variable - use global unique name if available,
@@ -957,6 +926,7 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
           sym->globalName.empty() ? sym->name : sym->globalName;
       out << "  la " << scratch << ", " << varName << "\n";
       out << "  sw " << reg << ", 0(" << scratch << ")\n";
+      releaseScratch(scratch);
     }
     break;
   }
