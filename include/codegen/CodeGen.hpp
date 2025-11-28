@@ -78,7 +78,8 @@ private:
   void placeLabel(const Operand &label);
   void output(const std::string &line);
   // folding constant expressions
-  bool tryEvalExp(Exp *exp, int &outVal);
+  bool tryEvalExp(class Exp *exp, int &outVal);
+  bool tryEvalConst(class ConstExp *ce, int &outVal);
   bool tryEvalConst(class AddExp *ae, int &outVal);
   bool tryEvalConst(class MulExp *me, int &outVal);
   bool tryEvalConst(class UnaryExp *ue, int &outVal);
@@ -151,6 +152,10 @@ private:
    * @brief the next string literal ID to use
    */
   int nextStringId_ = 0;
+  /**
+   * @brief the next static variable ID to use
+   */
+  int nextStaticId_ = 0;
   /**
    * @brief simple ir output control flag
    */

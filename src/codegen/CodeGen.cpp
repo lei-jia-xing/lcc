@@ -15,6 +15,7 @@ void CodeGen::reset() {
   constValues_.clear();
   stringLiterals_.clear();
   nextStringId_ = 0;
+  nextStaticId_ = 0;
   globalsIR_.clear();
   functions_.clear();
 }
@@ -55,6 +56,11 @@ bool CodeGen::tryEvalExp(Exp *exp, int &outVal) {
   if (!exp)
     return false;
   return tryEvalConst(exp->addExp.get(), outVal);
+}
+bool CodeGen::tryEvalConst(ConstExp *ce, int &outVal) {
+  if (!ce)
+    return false;
+  return tryEvalConst(ce->addExp.get(), outVal);
 }
 bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
   if (!pe)
@@ -614,35 +620,41 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
 
   int sizeInt = 1;
   if (def->arraySize) {
-    Operand sz = genConstExp(def->arraySize.get());
-    sizeInt = sz.asInt();
+    int val = 0;
+    if (tryEvalConst(def->arraySize.get(), val)) {
+      sizeInt = val;
+    }
   }
 
   if (isStaticCtx && ctx_.curBlk) {
     // for local static variable, allocate a special name
-    std::string gname = "_S_" +
-                        (ctx_.func ? ctx_.func->getName() : std::string("fn")) +
-                        "_" + def->ident;
+    std::string gname =
+        "_S_" + (ctx_.func ? ctx_.func->getName() : std::string("fn")) + "_" +
+        std::to_string(nextStaticId_++) + "_" + def->ident;
     sym->globalName = gname;
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
       // static variable store in .data
       emitGlobal(Instruction::MakeAlloca(Operand::Variable(sym),
                                          Operand::ConstantInt(sizeInt)));
-    }
-    if (def->initVal) {
-      if (!def->initVal->isArray) {
-        if (def->initVal->exp) {
-          Operand v = genExp(def->initVal->exp.get());
-          emit(Instruction::MakeAssign(v, Operand::Variable(sym)));
-        }
-      } else {
-        for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
-          auto &e = def->initVal->arrayExps[i];
-          Operand v = genExp(e.get());
-          emit(Instruction::MakeStore(
-              v, Operand::Variable(sym),
-              Operand::ConstantInt(static_cast<int>(i))));
+      if (def->initVal) {
+        if (!def->initVal->isArray) {
+          if (def->initVal->exp) {
+            int val = 0;
+            if (tryEvalExp(def->initVal->exp.get(), val)) {
+              emitGlobal(Instruction::MakeAssign(Operand::ConstantInt(val),
+                                                 Operand::Variable(sym)));
+            }
+          }
+        } else {
+          for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
+            int val = 0;
+            if (tryEvalExp(def->initVal->arrayExps[i].get(), val)) {
+              emitGlobal(Instruction::MakeStore(Operand::ConstantInt(val),
+                                                Operand::Variable(sym),
+                                                Operand::ConstantInt(i)));
+            }
+          }
         }
       }
     }
@@ -738,7 +750,7 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
       if (!index) { // is rvalue, as caller param
         Operand addr = newTemp();
         // pass address
-        emit(Instruction::MakeLoad(base, Operand(), addr));
+        emit(Instruction::MakeAssign(base, addr));
         return addr;
       }
       // otherwise is lvalue, return base
