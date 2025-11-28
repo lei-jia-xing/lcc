@@ -303,11 +303,11 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
   // global variable is evaluated in compile time, no need to emit here
-  // if (func->getName() == "main") {
-  //   for (auto *inst : curMod_->globals) {
-  //     lowerInstruction(inst, out);
-  //   }
-  // }
+  if (func->getName() == "main") {
+    for (auto *inst : curMod_->globals) {
+      lowerInstruction(inst, out);
+    }
+  }
 
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
@@ -601,7 +601,14 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto lit = locals_.find(sym.get());
       std::string baseReg = allocateScratch();
       if (lit != locals_.end()) {
-        if (isArray) {
+        bool isParam = false;
+        for (auto &p : formalParamByIndex_) {
+          if (p == sym.get()) {
+            isParam = true;
+            break;
+          }
+        }
+        if (isArray && !isParam) {
           out << "  addiu " << baseReg << ", $fp, " << lit->second.offset
               << "\n";
         } else {
