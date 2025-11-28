@@ -105,9 +105,7 @@ void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
   }
-  if (node->constinitVal) {
-    visit(node->constinitVal.get());
-  }
+  visit(node->constinitVal.get());
 }
 
 void SemanticAnalyzer::visit(VarDef *node, TypePtr type) {
@@ -129,9 +127,7 @@ void SemanticAnalyzer::visit(VarDef *node, TypePtr type) {
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
   }
-  if (node->initVal) {
-    visit(node->initVal.get());
-  }
+  visit(node->initVal.get());
 }
 
 void SemanticAnalyzer::visit(FuncFParams *node) {
@@ -153,7 +149,7 @@ void SemanticAnalyzer::visit(FuncFParam *node) {
   }
 
   auto paramSymbol = std::make_shared<Symbol>(node->ident, type, node->line);
-  node->symbol = paramSymbol; // Store symbol in AST node
+  node->symbol = paramSymbol;
   if (!symbolTable.addSymbol(paramSymbol)) {
     error(node->identLine, "b");
   }
@@ -323,7 +319,6 @@ void SemanticAnalyzer::visit(ReturnStmt *node) {
     }
   }
 
-  // Visit the return expression to ensure all symbols are resolved
   if (node->exp) {
     visit(node->exp.get());
   }
@@ -416,7 +411,7 @@ TypePtr SemanticAnalyzer::visit(LVal *node) {
     error(node->line, "c");
     return nullptr;
   }
-  node->symbol = symbol; // Store symbol in AST node
+  node->symbol = symbol;
   node->type = symbol->type;
   if (node->arrayIndex) {
     visit(node->arrayIndex.get());

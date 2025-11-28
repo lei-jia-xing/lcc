@@ -38,10 +38,15 @@ int main() {
     semanticAnalyzer.visit(compUnit.get());
   }
 
-  ErrorReporter::getInstance().printErrors();
+  if (ErrorReporter::getInstance().hasError()) {
+    ErrorReporter::getInstance().printErrors();
+    std::cerr.rdbuf(original_cerr);
+    std::cout.rdbuf(original_cout);
+    return 1;
+  }
 
   if (compUnit) {
-    CodeGen cg;
+    CodeGen cg(semanticAnalyzer.getSymbolTable());
     cg.generate(compUnit.get());
 
     IRModuleView mod;

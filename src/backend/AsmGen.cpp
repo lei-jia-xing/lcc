@@ -139,8 +139,9 @@ void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
     const GInfo &gi = kv.second;
     if (!gi.defined)
       continue;
-    // Use original name for global variables
-    out << sym->name << ": .word ";
+    // Use global unique name if available, otherwise original name
+    out << (sym->globalName.empty() ? sym->name : sym->globalName)
+        << ": .word ";
     for (int i = 0; i < gi.size; i++) {
       out << gi.inits[i];
       if (i + 1 < gi.size)
@@ -562,16 +563,18 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::LOAD: {
     // LOAD base(var), [index(var|temp|const)], dst(temp)
 
-    if (isVar(a1)) {
-      auto sym = a1.asSymbol();
-    }
+    auto sym = a1.asSymbol();
 
     std::string baseReg = getRegister(a1, out);
     std::string dstReg = getRegister(res, out);
 
     if (isEmpty(a2)) {
-      // Simple load: dst = *base
-      out << "  lw " << dstReg << ", 0(" << baseReg << ")\n";
+      bool isArray = sym->type && sym->type->category == Type::Category::Array;
+      if (isArray) {
+        out << "  move " << dstReg << ", " << baseReg << "\n";
+      } else {
+        out << "  lw " << dstReg << ", 0(" << baseReg << ")\n";
+      }
     } else if (isConst(a2)) {
       // Constant index: dst = *(base + index)
       int offset = a2.asInt() * 4;
@@ -605,8 +608,10 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
       } else {
-        // Global variable - use original name
-        out << "  la " << baseReg << ", " << sym->name << "\n";
+        // Global variable - use global unique name if available, otherwise
+        // original name
+        out << "  la " << baseReg << ", "
+            << (sym->globalName.empty() ? sym->name : sym->globalName) << "\n";
       }
 
       auto &idxOp = res;
@@ -789,7 +794,15 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
     if (lit != locals_.end()) {
       std::string scratch = allocateScratch();
       bool isArray = sym->type && sym->type->category == Type::Category::Array;
-      if (isArray) {
+      bool isParam = false;
+      for (auto param : formalParamByIndex_) {
+        if (param == sym.get()) {
+          isParam = true;
+          break;
+        }
+      }
+
+      if (isArray && !isParam) {
         // Load address of local array
         out << "  addiu " << scratch << ", $fp, " << lit->second.offset << "\n";
       } else {
@@ -798,15 +811,18 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
       }
       return scratch;
     } else {
-      // Global variable - use original name
+      // Global variable - use global unique name if available, otherwise
+      // original name
       std::string scratch = allocateScratch();
       bool isArray = sym->type && sym->type->category == Type::Category::Array;
+      std::string varName =
+          sym->globalName.empty() ? sym->name : sym->globalName;
       if (isArray) {
         // Load address of global array
-        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  la " << scratch << ", " << varName << "\n";
       } else {
         // Load value of global variable
-        out << "  la " << scratch << ", " << sym->name << "\n";
+        out << "  la " << scratch << ", " << varName << "\n";
         out << "  lw " << scratch << ", 0(" << scratch << ")\n";
       }
       return scratch;
@@ -842,9 +858,12 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
       // Store to local variable
       out << "  sw " << reg << ", " << lit->second.offset << "($fp)\n";
     } else {
-      // Store to global variable - use original name
+      // Store to global variable - use global unique name if available,
+      // otherwise original name
       std::string scratch = allocateScratch();
-      out << "  la " << scratch << ", " << sym->name << "\n";
+      std::string varName =
+          sym->globalName.empty() ? sym->name : sym->globalName;
+      out << "  la " << scratch << ", " << varName << "\n";
       out << "  sw " << reg << ", 0(" << scratch << ")\n";
     }
     break;
@@ -875,8 +894,6 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
   formalParamByIndex_.clear();
   bool inEntryParamRun = true;
   bool isFirstBlock = true;
-  if (!func)
-    return;
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
       auto op = inst.getOp();
@@ -911,7 +928,7 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
         if (sym.getType() == OperandType::Variable) {
           auto sp = sym.asSymbol().get();
           if (locals_.find(sp) == locals_.end()) {
-            int words = sz > 0 ? sz : 1;
+            int words = sz;
             locals_[sp] = {nextOffset, words};
             nextOffset += words * 4;
           }

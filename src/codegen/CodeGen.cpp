@@ -619,10 +619,11 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
   }
 
   if (isStaticCtx && ctx_.curBlk) {
-    // for static variable, allocate a special name
+    // for local static variable, allocate a special name
     std::string gname = "_S_" +
                         (ctx_.func ? ctx_.func->getName() : std::string("fn")) +
                         "_" + def->ident;
+    sym->globalName = gname;
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
       // static variable store in .data
