@@ -170,8 +170,8 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
       continue;
     emitFunction(func, out);
   }
+  // Copy in https://gist.github.com/KaceCottam/37a065a2c194c0eb50b417cf67455af1
   out << "printf:\n";
-  out << "  # Save registers\n";
   out << "  addiu $sp, $sp, -28\n";
   out << "  sw $t0, 0($sp)\n";
   out << "  sw $t1, 4($sp)\n";
@@ -206,7 +206,6 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "  ori $t2, $zero, 's'\n";
   out << "  subu $t2, $a0, $t2\n";
   out << "  beq $t2, $zero, printf_str\n";
-  out << "  # Unknown format, just print the character\n";
   out << "  j printf_char\n";
   out << "\n";
   out << "printf_int:\n";
@@ -322,6 +321,26 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
+  if (func->getName() == "main") {
+    for (auto *inst : curMod_->globals) {
+      bool isConstInit = false;
+      if (inst->getOp() == OpCode::ALLOCA)
+        continue;
+      if (inst->getOp() == OpCode::ASSIGN) {
+        if (inst->getArg1().getType() == OperandType::ConstantInt) {
+          isConstInit = true;
+        }
+      }
+      if (inst->getOp() == OpCode::STORE) {
+        if (inst->getArg1().getType() == OperandType::ConstantInt) {
+          isConstInit = true;
+        }
+      }
+      if (!isConstInit) {
+        lowerInstruction(inst, out);
+      }
+    }
+  }
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
       lowerInstruction(&inst, out);
@@ -383,7 +402,16 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
 
   auto storeToSpill = [&](int tempId, const std::string &reg) {
     if (_regAllocator.isSpilled(tempId)) {
-      out << "  sw " << reg << ", " << _spillOffsets[tempId] << "($fp)\n";
+      int offset = _spillOffsets[tempId];
+      if (offset >= -32768 && offset <= 32767) {
+        out << "  sw " << reg << ", " << offset << "($fp)\n";
+      } else {
+        std::string addrReg = allocateScratch();
+        out << "  li " << addrReg << ", " << offset << "\n";
+        out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
+        out << "  sw " << reg << ", 0(" << addrReg << ")\n";
+        releaseScratch(addrReg);
+      }
     }
   };
   auto getResultReg = [&](const Operand &r) -> std::string {
@@ -728,13 +756,18 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
 
     // Push extra arguments (beyond $a0-$a3) onto stack
     int extraCount = pendingExtraArgs_.size();
+    int extraBytes = 0;
     if (extraCount > 0) {
-      int extraBytes = extraCount * 4;
+      extraBytes = extraCount * 4;
+      if (extraBytes % 8 != 0) {
+        extraBytes += 4;
+      }
       out << "  addiu $sp, $sp, -" << extraBytes << "\n";
       for (int i = 0; i < extraCount; ++i) {
         const Operand &arg = pendingExtraArgs_[i];
         std::string r = getRegister(arg, out);
         out << "  sw " << r << ", " << (i * 4) << "($sp)\n";
+        releaseScratch(r);
       }
     }
 
@@ -744,7 +777,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
 
     // Clean up extra arguments from stack
     if (extraCount > 0) {
-      out << "  addiu $sp, $sp, " << (extraCount * 4) << "\n";
+      out << "  addiu $sp, $sp, " << extraBytes << "\n";
       pendingExtraArgs_.clear();
     }
 
@@ -808,8 +841,16 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
     if (_regAllocator.isSpilled(op.asInt())) {
       // Load from spill location
       std::string varScratch = allocateScratch();
-      out << "  lw " << varScratch << ", " << _spillOffsets.at(op.asInt())
-          << "($fp)\n";
+      int off = _spillOffsets.at(op.asInt());
+      if (off >= -32768 && off <= 32767) {
+        out << "  lw " << varScratch << ", " << off << "($fp)\n";
+      } else {
+        std::string addrReg = allocateScratch();
+        out << "  li " << addrReg << ", " << off << "\n";
+        out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
+        out << "  lw " << varScratch << ", 0(" << addrReg << ")\n";
+        releaseScratch(addrReg);
+      }
       return varScratch;
     }
     return regForTemp(op.asInt());
@@ -896,11 +937,17 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
   switch (op.getType()) {
   case OperandType::Temporary:
     if (_regAllocator.isSpilled(op.asInt())) {
-      // Store to spill location
-      out << "  sw " << reg << ", " << _spillOffsets.at(op.asInt())
-          << "($fp)\n";
+      int off = _spillOffsets.at(op.asInt());
+      if (off >= -32768 && off <= 32767) {
+        out << "  sw " << reg << ", " << off << "($fp)\n";
+      } else {
+        std::string addrReg = allocateScratch();
+        out << "  li " << addrReg << ", " << off << "\n";
+        out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
+        out << "  sw " << reg << ", 0(" << addrReg << ")\n";
+        releaseScratch(addrReg);
+      }
     }
-    // If not spilled, the value should already be in the correct register
     break;
 
   case OperandType::Variable: {
