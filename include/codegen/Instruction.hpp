@@ -25,8 +25,8 @@ enum class OpCode {
 
   ASSIGN, // ASSIGN src(var|temp|const), -, dst(var|temp)
 
-  LOAD,  // LOAD base(var), [index(var|temp|const)], dst(var|temp)
-  STORE, // STORE value(var|temp|const), base(var), index(var|temp|const)
+  LOAD,  // LOAD base(var|temp), [index(var|temp|const)], dst(var|temp)
+  STORE, // STORE value(var|temp|const), base(var|temp), index(var|temp|const)
 
   IF,    // IF cond(var|temp|const), -, res(label)
   GOTO,  // GOTO -, -, res(label)

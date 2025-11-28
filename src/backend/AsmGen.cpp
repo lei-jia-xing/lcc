@@ -6,11 +6,10 @@
 #include <iostream>
 
 AsmGen::AsmGen() {
-  static const char *Regs[18] = {"$s0", "$s1", "$s2", "$s3", "$s4", "$s5",
-                                 "$s6", "$s7", "$t0", "$t1", "$t2", "$t3",
-                                 "$t4", "$t5", "$t6", "$t7", "$t8", "$t9"};
-  regs_.reserve(18);
-  for (int i = 0; i < 18; ++i) {
+  static const char *Regs[NUM_ALLOCATABLE_REGS] = {"$s0", "$s1", "$s2", "$s3",
+                                                   "$s4", "$s5", "$s6", "$s7"};
+  regs_.reserve(NUM_ALLOCATABLE_REGS);
+  for (int i = 0; i < NUM_ALLOCATABLE_REGS; ++i) {
     regs_.push_back({Regs[i], false, -1});
   }
   scratchRegs_.push_back({"$t0", 0});
@@ -269,7 +268,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   out << func->getName() << ":\n";
   if (frameSize_ < 8)
     frameSize_ = 8;
-  out << "  addiu $sp,$sp,-" << frameSize_ << "\n";
+  if (frameSize_ > 32767) {
+    out << "  li $t0, -" << frameSize_ << "\n";
+    out << "  addu $sp, $sp, $t0\n" << "\n";
+  } else {
+    out << "  addiu $sp, $sp, -" << frameSize_ << "\n";
+  }
   out << "  sw $ra, 0($sp)\n";
   out << "  sw $fp, 4($sp)\n";
   out << "  move $fp, $sp\n";
@@ -317,7 +321,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   out << currentEpilogueLabel_ << ":\n";
   out << "  lw $ra, 0($fp)\n";
   out << "  lw $fp, 4($fp)\n";
-  out << "  addiu $sp, $sp, " << frameSize_ << "\n";
+  if (frameSize_ > 32767) {
+    out << "  li $t0, " << frameSize_ << "\n";
+    out << "  addu $sp, $sp, $t0\n";
+  } else {
+    out << "  addiu $sp, $sp, " << frameSize_ << "\n";
+  }
   if (func->getName() == "main") {
     out << "  li $v0, 10\n";
     out << "  syscall\n";
@@ -507,7 +516,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       break;
     }
 
-    // Store result if needed
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -561,49 +569,20 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::LOAD: {
-    // LOAD base(var), [index(var|temp|const)], dst(temp)
+    // LOAD base(var|temp), [index(var|temp|const)], dst(temp)
+    std::string baseReg;
+    const Symbol *baseSym = nullptr;
 
-    auto sym = a1.asSymbol();
-
-    std::string baseReg = getRegister(a1, out);
-    std::string dstReg = getRegister(res, out);
-
-    if (isEmpty(a2)) {
-      bool isArray = sym->type && sym->type->category == Type::Category::Array;
-      if (isArray) {
-        out << "  move " << dstReg << ", " << baseReg << "\n";
-      } else {
-        out << "  lw " << dstReg << ", 0(" << baseReg << ")\n";
-      }
-    } else if (isConst(a2)) {
-      // Constant index: dst = *(base + index)
-      int offset = a2.asInt() * 4;
-      out << "  lw " << dstReg << ", " << offset << "(" << baseReg << ")\n";
-    } else {
-      // Variable index: dst = *(base + index)
-      std::string indexReg = getRegister(a2, out);
-      std::string offsetReg = allocateScratch();
-      out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
-      out << "  addu " << dstReg << ", " << baseReg << ", " << offsetReg
-          << "\n";
-      out << "  lw " << dstReg << ", 0(" << dstReg << ")\n";
-    }
-
-    storeResult(res, dstReg, out);
-    break;
-  }
-  case OpCode::STORE: {
-    // STORE value(var|temp|const), base(var), index(var|temp|const)
-    std::string rv = getRegister(a1, out);
-    if (isVar(a2)) {
-      auto sym = a2.asSymbol();
-      bool isArray = sym->type && sym->type->category == Type::Category::Array;
-      auto lit = locals_.find(sym.get());
-      std::string baseReg = allocateScratch();
+    if (isVar(a1)) {
+      baseSym = a1.asSymbol().get();
+      auto lit = locals_.find(baseSym);
+      baseReg = allocateScratch();
       if (lit != locals_.end()) {
+        bool isArray =
+            baseSym->type && baseSym->type->category == Type::Category::Array;
         bool isParam = false;
         for (auto &p : formalParamByIndex_) {
-          if (p == sym.get()) {
+          if (p == baseSym) {
             isParam = true;
             break;
           }
@@ -615,25 +594,106 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
       } else {
-        // Global variable - use global unique name if available, otherwise
-        // original name
-        out << "  la " << baseReg << ", "
-            << (sym->globalName.empty() ? sym->name : sym->globalName) << "\n";
+        // global varibale
+        std::string varName =
+            baseSym->globalName.empty() ? baseSym->name : baseSym->globalName;
+        out << "  la " << baseReg << ", " << varName << "\n";
       }
+    } else {
+      // temp
+      baseReg = getRegister(a1, out);
+    }
 
-      auto &idxOp = res;
-      if (isConst(idxOp)) {
-        out << "  sw " << rv << ", " << (idxOp.asInt() * 4) << "(" << baseReg
-            << ")\n";
+    std::string dstReg = getRegister(res, out);
+
+    if (isEmpty(a2)) {
+      bool isArrary = baseSym && baseSym->type &&
+                      baseSym->type->category == Type::Category::Array;
+      if (isArrary) {
+        out << "  move " << dstReg << ", " << baseReg << "\n";
       } else {
-        std::string indexReg = getRegister(idxOp, out);
-        std::string offsetReg = allocateScratch();
-        std::string addrReg = allocateScratch();
-        out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
-        out << "  addu " << addrReg << ", " << baseReg << ", " << offsetReg
-            << "\n";
-        out << "  sw " << rv << ", 0(" << addrReg << ")\n";
+        out << "  lw " << dstReg << ", 0(" << baseReg << ")\n";
       }
+    } else if (isConst(a2)) {
+      int offset = a2.asInt() * 4;
+      if (offset >= -32768 && offset <= 32767) {
+        out << "  lw " << dstReg << ", " << offset << "(" << baseReg << ")\n";
+      } else {
+        std::string offReg = allocateScratch();
+        out << "  li " << offReg << ", " << offset << "\n";
+        out << "  addu " << offReg << ", " << baseReg << ", " << offReg << "\n";
+        out << "  lw " << dstReg << ", 0(" << offReg << ")\n";
+      }
+    } else {
+      std::string indexReg = getRegister(a2, out);
+      std::string offsetReg = allocateScratch();
+      out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
+
+      out << "  addu " << offsetReg << ", " << baseReg << ", " << offsetReg
+          << "\n";
+      out << "  lw " << dstReg << ", 0(" << offsetReg << ")\n";
+    }
+    storeResult(res, dstReg, out);
+    break;
+  }
+  case OpCode::STORE: {
+    // STORE value(var|temp|const), base(var|temp), index(var|temp|const)
+    std::string rv = getRegister(a1, out);
+    std::string baseReg;
+    const Symbol *baseSym = nullptr;
+
+    if (isVar(a2)) {
+      baseSym = a2.asSymbol().get();
+      auto lit = locals_.find(baseSym);
+      baseReg = allocateScratch();
+      if (lit != locals_.end()) {
+        bool isArray =
+            baseSym->type && baseSym->type->category == Type::Category::Array;
+        bool isParam = false;
+        for (auto &p : formalParamByIndex_) {
+          if (p == baseSym) {
+            isParam = true;
+            break;
+          }
+        }
+        if (isArray && !isParam) {
+          out << "  addiu " << baseReg << ", $fp, " << lit->second.offset
+              << "\n";
+        } else {
+          out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
+        }
+      } else {
+        // global variable
+        std::string varName =
+            baseSym->globalName.empty() ? baseSym->name : baseSym->globalName;
+        out << "  la " << baseReg << ", " << varName << "\n";
+      }
+    } else {
+      // temp
+      baseReg = getRegister(a2, out);
+    }
+
+    auto &idxOp = res;
+
+    if (isEmpty(idxOp)) {
+      out << "  sw " << rv << ", 0(" << baseReg << ")\n";
+    } else if (isConst(idxOp)) {
+      int offset = idxOp.asInt() * 4;
+      if (offset >= -32768 && offset <= 32767) {
+        out << "  sw " << rv << ", " << offset << "(" << baseReg << ")\n";
+      } else {
+        std::string offReg = allocateScratch();
+        out << "  li " << offReg << ", " << offset << "\n";
+        out << "  addu " << offReg << ", " << baseReg << ", " << offReg << "\n";
+        out << "  sw " << rv << ", 0(" << offReg << ")\n";
+      }
+    } else {
+      std::string indexReg = getRegister(idxOp, out);
+      std::string offsetReg = allocateScratch();
+      out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
+      out << "  addu " << offsetReg << ", " << baseReg << ", " << offsetReg
+          << "\n";
+      out << "  sw " << rv << ", 0(" << offsetReg << ")\n";
     }
     break;
   }
@@ -789,6 +849,8 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
   case OperandType::ConstantInt: {
     // Always load constants into registers for proper MIPS assembly
     int value = op.asInt();
+    if (value == 0)
+      return "$zero";
     std::string scratch = allocateScratch();
     out << "  li " << scratch << ", " << value << "\n";
     return scratch;
@@ -811,10 +873,25 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
 
       if (isArray && !isParam) {
         // Load address of local array
-        out << "  addiu " << scratch << ", $fp, " << lit->second.offset << "\n";
+        int offset = lit->second.offset;
+        if (offset >= -32768 && offset <= 32767) {
+          out << "  addiu " << scratch << ", $fp, " << offset << "\n";
+        } else {
+          out << "  li " << scratch << ", " << offset << "\n";
+          out << "  addu " << scratch << ", $fp, " << scratch << "\n";
+        }
       } else {
         // Load value of local variable
-        out << "  lw " << scratch << ", " << lit->second.offset << "($fp)\n";
+        int offset = lit->second.offset;
+        if (offset >= -32768 && offset <= 32767) {
+          out << "  lw " << scratch << ", " << offset << "($fp)\n";
+        } else {
+          std::string addrReg = allocateScratch();
+          out << "  li " << addrReg << ", " << offset << "\n";
+          out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
+          out << "  lw " << scratch << ", 0(" << addrReg << ")\n";
+          releaseScratch(addrReg);
+        }
       }
       return scratch;
     } else {
@@ -863,7 +940,15 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
     auto lit = locals_.find(sym.get());
     if (lit != locals_.end()) {
       // Store to local variable
-      out << "  sw " << reg << ", " << lit->second.offset << "($fp)\n";
+      int off = lit->second.offset;
+      if (off >= -32768 && off <= 32767) {
+        out << "  sw " << reg << ", " << lit->second.offset << "($fp)\n";
+      } else {
+        std::string addrReg = allocateScratch();
+        out << "  li " << addrReg << ", " << off << "\n";
+        out << "  addu " << addrReg << ", $fp, " << addrReg << "\n";
+        out << "  sw " << reg << ", 0(" << addrReg << ")\n";
+      }
     } else {
       // Store to global variable - use global unique name if available,
       // otherwise original name
