@@ -159,6 +159,7 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
     out << ".globl " << func->getName() << "\n";
   }
   const Function *mainFunc = nullptr;
+  // special handle main function first
   for (auto *func : mod.functions) {
     if (func && func->getName() == std::string("main")) {
       mainFunc = func;
@@ -174,8 +175,8 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   }
   // Copy in https://gist.github.com/KaceCottam/37a065a2c194c0eb50b417cf67455af1
   out << "printf:\n";
-  out << "  addiu $sp, $sp, -28\n";
-  out << "  sw $t0, 0($sp)\n";
+  out << "  addi $sp, $sp, -28\n";
+  out << "  sw $t0, ($sp)\n";
   out << "  sw $t1, 4($sp)\n";
   out << "  sw $t2, 8($sp)\n";
   out << "  sw $a0, 12($sp)\n";
@@ -202,23 +203,10 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "  ori $t2, $zero, 'd'\n";
   out << "  subu $t2, $a0, $t2\n";
   out << "  beq $t2, $zero, printf_int\n";
-  out << "  ori $t2, $zero, 'c'\n";
-  out << "  subu $t2, $a0, $t2\n";
-  out << "  beq $t2, $zero, printf_char\n";
-  out << "  ori $t2, $zero, 's'\n";
-  out << "  subu $t2, $a0, $t2\n";
-  out << "  beq $t2, $zero, printf_str\n";
   out << "  j printf_char\n";
   out << "\n";
   out << "printf_int:\n";
   out << "  li $v0, 1\n";
-  out << "  lw $a0, 0($t1)\n";
-  out << "  addiu $t1, $t1, 4\n";
-  out << "  syscall\n";
-  out << "  j printf_loop\n";
-  out << "\n";
-  out << "printf_str:\n";
-  out << "  li $v0, 4\n";
   out << "  lw $a0, 0($t1)\n";
   out << "  addiu $t1, $t1, 4\n";
   out << "  syscall\n";
@@ -239,7 +227,6 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "  lw $a2, 20($sp)\n";
   out << "  lw $a3, 24($sp)\n";
   out << "  addiu $sp, $sp, 28\n";
-  out << "  move $v0, $zero\n";
   out << "  jr $ra\n\n";
   out << "getint:\n";
   out << "  li $v0, 5\n";
@@ -254,6 +241,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 
   _regAllocator.run(const_cast<Function *>(func));
 
+  // just save all used callee-saved registers
   std::vector<int> calleeSavedRegs;
   const std::set<int> &usedRegs = _regAllocator.getUsedRegs();
   for (int r : usedRegs) {
@@ -326,6 +314,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   if (func->getName() == "main") {
     for (auto *inst : curMod_->globals) {
       bool isConstInit = false;
+      // some variable may be evaluated in runtime, unlike c
       if (inst->getOp() == OpCode::ALLOCA)
         continue;
       if (inst->getOp() == OpCode::ASSIGN) {
@@ -404,6 +393,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   };
 
   auto storeToSpill = [&](int tempId, const std::string &reg) {
+    // store in stack frame when register is spilled
     if (_regAllocator.isSpilled(tempId)) {
       int offset = _spillOffsets[tempId];
       if (offset >= -32768 && offset <= 32767) {
@@ -418,6 +408,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
   };
   auto getResultReg = [&](const Operand &r) -> std::string {
+    // allocate register according to Operand r
     if (isTemp(r) && !_regAllocator.isSpilled(r.asInt())) {
       return regForTemp(r.asInt());
     }
@@ -514,6 +505,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::LE:
   case OpCode::GT:
   case OpCode::GE: {
+    // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
     std::string rb = getRegister(a2, out);
     std::string rd = getResultReg(res);
@@ -860,7 +852,6 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
     return regForTemp(op.asInt());
 
   case OperandType::ConstantInt: {
-    // Always load constants into registers for proper MIPS assembly
     int value = op.asInt();
     if (value == 0)
       return "$zero";
@@ -908,26 +899,22 @@ std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
       }
       return scratch;
     } else {
-      // Global variable - use global unique name if available, otherwise
-      // original name
       std::string scratch = allocateScratch();
       bool isArray = sym->type && sym->type->category == Type::Category::Array;
       std::string varName =
           sym->globalName.empty() ? sym->name : sym->globalName;
       if (isArray) {
-        // Load address of global array
         out << "  la " << scratch << ", " << varName << "\n";
       } else {
-        // Load value of global variable
         out << "  la " << scratch << ", " << varName << "\n";
         out << "  lw " << scratch << ", 0(" << scratch << ")\n";
       }
       return scratch;
     }
   }
-
+  // no support
   case OperandType::Label:
-    return "$zero"; // Labels are not loaded into registers
+    return "$zero";
 
   case OperandType::Empty:
     return "$zero";
@@ -970,8 +957,6 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
         releaseScratch(addrReg);
       }
     } else {
-      // Store to global variable - use global unique name if available,
-      // otherwise original name
       std::string scratch = allocateScratch();
       std::string varName =
           sym->globalName.empty() ? sym->name : sym->globalName;
@@ -983,12 +968,8 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
   }
 
   case OperandType::ConstantInt:
-    // Constants don't need storing
-    break;
-
   case OperandType::Label:
   case OperandType::Empty:
-    // Nothing to do
     break;
   }
 }
