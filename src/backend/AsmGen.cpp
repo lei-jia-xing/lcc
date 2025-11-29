@@ -774,7 +774,9 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
 
     // Call function
-    std::string fname = isVar(a2) ? a2.asSymbol()->name : std::string("func");
+    std::string fname = a2.asSymbol()->globalName.empty()
+                            ? a2.asSymbol()->name
+                            : a2.asSymbol()->globalName;
     out << "  jal " << fname << "\n";
 
     // Clean up extra arguments from stack

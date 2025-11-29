@@ -4,7 +4,7 @@
 
 struct Symbol {
   std::string name;
-  std::string globalName; // Global unique name (e.g., for static variables)
+  std::string globalName; // Global unique name
   TypePtr type;
   int line;
 

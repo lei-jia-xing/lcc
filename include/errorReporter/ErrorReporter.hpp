@@ -40,6 +40,11 @@ public:
    */
   bool hasError() const { return !errors.empty(); }
 
+  /**
+   * @brief clear all recorded errors
+   */
+  void clearErrors() { errors.clear(); }
+
 private:
   ErrorReporter() = default;
   ~ErrorReporter() = default;

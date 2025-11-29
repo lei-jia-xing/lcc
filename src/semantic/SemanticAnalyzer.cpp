@@ -176,7 +176,7 @@ void SemanticAnalyzer::visit(FuncDef *node) {
   if (!symbolTable.addSymbol(funcSymbol)) {
     error(node->identLine, "b");
   }
-
+  node->symbol = funcSymbol;
   symbolTable.pushScope();
 
   current_function_return_type = returnType;

@@ -286,8 +286,9 @@ void CodeGen::genFunction(FuncDef *funcDef) {
   if (!funcDef)
     return;
 
-  auto funcPtr = std::make_shared<Function>(funcDef->ident);
-
+  auto funcPtr = std::make_shared<Function>("fn_" + funcDef->ident);
+  std::string globalName = "fn_" + funcDef->ident;
+  funcDef->symbol->globalName = globalName;
   // save current context
   auto savedFunc = ctx_.func;
   auto savedBlk = ctx_.curBlk;
@@ -628,9 +629,8 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
 
   if (isStaticCtx && ctx_.curBlk) {
     // for local static variable, allocate a special name
-    std::string gname =
-        "_S_" + (ctx_.func ? ctx_.func->getName() : std::string("fn")) + "_" +
-        std::to_string(nextStaticId_++) + "_" + def->ident;
+    std::string gname = "_S_" + ctx_.func->getName() + "_" +
+                        std::to_string(nextStaticId_++) + "_" + def->ident;
     sym->globalName = gname;
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
@@ -762,8 +762,10 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
   }
   // arrary element
   Operand idx = genExp(lval->arrayIndex.get());
-  if (index)
+  if (index) {
     *index = idx;
+    return base;
+  }
   Operand dst = newTemp(); // pass by value
   emit(Instruction::MakeLoad(base, idx, dst));
   return dst;

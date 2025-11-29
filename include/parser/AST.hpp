@@ -170,6 +170,7 @@ public:
 class FuncDef : public ASTNode {
 public:
   std::unique_ptr<FuncType> funcType;
+  std::shared_ptr<Symbol> symbol;
   std::string ident;
   int identLine = 0;
   std::unique_ptr<FuncFParams> params;
