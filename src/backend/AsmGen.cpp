@@ -1,6 +1,7 @@
 #include "backend/AsmGen.hpp"
 #include "codegen/Function.hpp"
 #include "codegen/Instruction.hpp"
+#include "codegen/Operand.hpp"
 #include "semantic/Symbol.hpp"
 #include "semantic/Type.hpp"
 #include <iostream>
@@ -51,15 +52,16 @@ void AsmGen::generate(const IRModuleView &mod, std::ostream &out) {
 void AsmGen::emitDataSection(const IRModuleView &mod, std::ostream &out) {
   out << ".data\n";
   for (auto &kv : mod.stringLiterals) {
-    const std::string &raw = kv.second;
-    size_t start = 0, end = raw.size();
-    if (end >= 2 && raw.front() == '"' && raw.back() == '"') {
+    const std::string &literal = kv.first;
+    const std::string &label = kv.second->name;
+    size_t start = 0, end = literal.size();
+    if (end >= 2 && literal.front() == '"' && literal.back() == '"') {
       start = 1;
       end -= 1;
     }
-    out << kv.first << ": .asciiz \"";
+    out << label << ": .asciiz \"";
     for (size_t i = start; i < end; ++i) {
-      char c = raw[i];
+      char c = literal[i];
       out << c;
     }
     out << "\"\n";
@@ -332,7 +334,8 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
         }
       }
       if (inst->getOp() == OpCode::STORE) {
-        if (inst->getArg1().getType() == OperandType::ConstantInt) {
+        if (inst->getArg1().getType() == OperandType::ConstantInt &&
+            inst->getResult().getType() == OperandType::ConstantInt) {
           isConstInit = true;
         }
       }
@@ -727,8 +730,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
       if (isVar(a1)) {
         std::string name = a1.asSymbol()->name;
-        bool isStr = curMod_ && curMod_->stringLiterals.find(name) !=
-                                    curMod_->stringLiterals.end();
+        bool isStr = name.substr(0, 4) == ".fmt";
         if (isStr) {
           // string literal, load address
           out << "  la " << aregs[idx] << ", " << name << "\n";

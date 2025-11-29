@@ -16,7 +16,7 @@ struct IRModuleView {
   std::vector<const Function *> functions;
 
   std::vector<const Instruction *> globals;
-  std::unordered_map<std::string, std::string> stringLiterals;
+  std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals;
 };
 
 /**

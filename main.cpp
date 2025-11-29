@@ -42,7 +42,7 @@ int main() {
     ErrorReporter::getInstance().printErrors();
     std::cerr.rdbuf(original_cerr);
     std::cout.rdbuf(original_cout);
-    return 1;
+    exit(1);
   }
 
   if (compUnit) {
@@ -58,9 +58,9 @@ int main() {
       mod.globals.push_back(&globals[i]);
     }
     for (const auto &kv : cg.getStringLiteralSymbols()) {
-      const std::string &literal = kv.first;
-      const std::string &label = kv.second->name;
-      mod.stringLiterals[label] = literal;
+      auto &literal = kv.first;
+      auto &label = kv.second;
+      mod.stringLiterals[literal] = label;
     }
 
     std::ofstream asmout("mips.txt");
