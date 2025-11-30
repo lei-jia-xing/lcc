@@ -174,18 +174,19 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
     emitFunction(func, out);
   }
   // Copy in https://gist.github.com/KaceCottam/37a065a2c194c0eb50b417cf67455af1
+  // align to 8 bytes
   out << "printf:\n";
-  out << "  addi $sp, $sp, -28\n";
-  out << "  sw $t0, ($sp)\n";
-  out << "  sw $t1, 4($sp)\n";
-  out << "  sw $t2, 8($sp)\n";
-  out << "  sw $a0, 12($sp)\n";
-  out << "  sw $a1, 16($sp)\n";
-  out << "  sw $a2, 20($sp)\n";
-  out << "  sw $a3, 24($sp)\n";
+  out << "  addi $sp, $sp, -32\n";
+  out << "  sw $t0, 4($sp)\n";
+  out << "  sw $t1, 8($sp)\n";
+  out << "  sw $t2, 12($sp)\n";
+  out << "  sw $a0, 16($sp)\n";
+  out << "  sw $a1, 20($sp)\n";
+  out << "  sw $a2, 24($sp)\n";
+  out << "  sw $a3, 28($sp)\n";
   out << "\n";
   out << "  la $t0, ($a0)      # t0: current position in format string\n";
-  out << "  addiu $t1, $sp, 16 # t1: pointer to current argument\n";
+  out << "  addiu $t1, $sp, 20 # t1: pointer to current argument\n";
   out << "  li $t2, 0          # t2: temporary for comparison\n";
   out << "\n";
   out << "printf_loop:\n";
@@ -219,14 +220,14 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   out << "\n";
   out << "printf_end:\n";
   out << "  # Restore registers\n";
-  out << "  lw $t0, 0($sp)\n";
-  out << "  lw $t1, 4($sp)\n";
-  out << "  lw $t2, 8($sp)\n";
-  out << "  lw $a0, 12($sp)\n";
-  out << "  lw $a1, 16($sp)\n";
-  out << "  lw $a2, 20($sp)\n";
-  out << "  lw $a3, 24($sp)\n";
-  out << "  addiu $sp, $sp, 28\n";
+  out << "  lw $t0, 4($sp)\n";
+  out << "  lw $t1, 8($sp)\n";
+  out << "  lw $t2, 12($sp)\n";
+  out << "  lw $a0, 16($sp)\n";
+  out << "  lw $a1, 20($sp)\n";
+  out << "  lw $a2, 24($sp)\n";
+  out << "  lw $a3, 28($sp)\n";
+  out << "  addiu $sp, $sp, 32\n";
   out << "  jr $ra\n\n";
   out << "getint:\n";
   out << "  li $v0, 5\n";
@@ -235,6 +236,15 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
 }
 
 void AsmGen::emitFunction(const Function *func, std::ostream &out) {
+  /*
+   * Caller's stack frame layout
+   * Caller's extra params
+   * used callee-saved registers
+   * Spilled temp
+   * local variables
+   * $fp
+   * $ra
+   */
   curFuncName_ = func->getName();
   resetFunctionState();
   analyzeFunctionLocals(func);
@@ -256,17 +266,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   frameSize_ = spillBaseOffset;
 
+  int savedRegBase = frameSize_;
+
   int savedRegSize = calleeSavedRegs.size() * 4;
   frameSize_ += savedRegSize;
 
-  int rem = frameSize_ % 8;
-  if (rem != 0)
-    // allign to 8 bytes
-    frameSize_ += (8 - rem);
-
   out << func->getName() << ":\n";
-  if (frameSize_ < 8)
-    frameSize_ = 8;
   if (frameSize_ > 32767) {
     out << "  li $t0, -" << frameSize_ << "\n";
     out << "  addu $sp, $sp, $t0\n" << "\n";
@@ -278,7 +283,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 
   for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
     int regId = calleeSavedRegs[i];
-    int offset = 8 + i * 4;
+    int offset = savedRegBase + i * 4;
     out << "  sw " << regs_[regId].name << ", " << offset << "($sp)\n";
   }
   out << "  move $fp, $sp\n";
@@ -341,7 +346,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   out << currentEpilogueLabel_ << ":\n";
   for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
     int regId = calleeSavedRegs[i];
-    int offset = 8 + i * 4;
+    int offset = savedRegBase + i * 4;
     out << "  lw " << regs_[regId].name << ", " << offset << "($sp)\n";
   }
 
@@ -354,7 +359,8 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     out << "  addiu $sp, $sp, " << frameSize_ << "\n";
   }
   if (func->getName() == "main") {
-    out << "  li $v0, 10\n";
+    out << "  move $a0, $v0\n";
+    out << "  li $v0, 17\n";
     out << "  syscall\n";
   } else {
     out << "  jr $ra\n";
@@ -753,9 +759,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     int extraBytes = 0;
     if (extraCount > 0) {
       extraBytes = extraCount * 4;
-      if (extraBytes % 8 != 0) {
-        extraBytes += 4;
-      }
       out << "  addiu $sp, $sp, -" << extraBytes << "\n";
       for (int i = 0; i < extraCount; ++i) {
         const Operand &arg = pendingExtraArgs_[i];
@@ -984,7 +987,7 @@ void AsmGen::resetFunctionState() {
 }
 
 void AsmGen::analyzeFunctionLocals(const Function *func) {
-  int nextOffset = 8;
+  int nextOffset = 8; // start after saved $ra and $fp
   formalParamByIndex_.clear();
   bool inEntryParamRun = true;
   bool isFirstBlock = true;
@@ -1035,8 +1038,4 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
     isFirstBlock = false;
   }
   frameSize_ = nextOffset;
-  int rem = frameSize_ % 8;
-  if (rem != 0)
-    // align to 8 bytes
-    frameSize_ += (8 - rem);
 }
