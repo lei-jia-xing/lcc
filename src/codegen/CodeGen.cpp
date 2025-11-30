@@ -904,7 +904,9 @@ Operand CodeGen::genRel(RelExp *re) {
   if (re->op == RelExp::OpType::NONE) {
     return genAdd(re->addExp.get());
   }
-
+  if (!re->left) {
+    return genAdd(re->addExp.get());
+  }
   Operand left = genRel(re->left.get());
   Operand right = genAdd(re->addExp.get());
 
@@ -939,7 +941,9 @@ Operand CodeGen::genEq(EqExp *ee) {
   if (ee->op == EqExp::OpType::NONE) {
     return genRel(ee->relExp.get());
   }
-
+  if (!ee->left) {
+    return genRel(ee->relExp.get());
+  }
   Operand left = genEq(ee->left.get());
   Operand right = genRel(ee->relExp.get());
   OpCode op = (ee->op == EqExp::OpType::EQL) ? OpCode::EQ : OpCode::NEQ;
