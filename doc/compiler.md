@@ -1,182 +1,164 @@
 # LCC 编译器设计文档
 
-## 概述
+## 项目结构
 
-LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子集编译器,目标架构为 MIPS。本文档详细描述了编译器的整体架构、各组件设计、实现细节
-
-## 编译器架构
-
-### 项目结构
+下面的目录树由实际仓库生成，反映当前编译器完整的项目布局：
 
 ```
-lcc/
-├── src/                          # 源代码目录
-│   ├── lexer/                    # 词法分析器
-│   │   └── Lexer.cpp
-│   └── parser/                   # 语法分析器
-│       └── Parser.cpp
-├── include/                      # 头文件目录
-│   ├── lexer/
+.
+├── CMakeLists.txt
+├── config.json
+├── doc
+│   ├── backend.md
+│   ├── compiler.md
+│   ├── ebnf.md
+│   ├── error.md
+│   ├── errorReporter.md
+│   ├── ir.md
+│   ├── lexer.md
+│   ├── overview.md
+│   ├── parser.md
+│   └── semantic.md
+├── Doxyfile
+├── include
+│   ├── backend
+│   │   ├── AsmGen.hpp
+│   │   └── RegisterAllocator.hpp
+│   ├── codegen
+│   │   ├── BasicBlock.hpp
+│   │   ├── CodeGen.hpp
+│   │   ├── Function.hpp
+│   │   ├── Instruction.hpp
+│   │   ├── Operand.hpp
+│   │   └── QuadOptimizer.hpp
+│   ├── errorReporter
+│   │   └── ErrorReporter.hpp
+│   ├── lexer
 │   │   ├── Lexer.hpp
 │   │   └── Token.hpp
-│   └── parser/
-│       ├── Parser.hpp
-│       └── AST.hpp
-├── doc/                          # 文档目录
-│   └── compiler.md
-├── build/                        # 构建目录
-├── main.cpp                      # 主程序入口
-├── CMakeLists.txt                # 构建配置
-└── README.md                     # 项目说明
+│   ├── parser
+│   │   ├── AST.hpp
+│   │   └── Parser.hpp
+│   └── semantic
+│       ├── SemanticAnalyzer.hpp
+│       ├── Symbol.hpp
+│       ├── SymbolTable.hpp
+│       └── Type.hpp
+├── LICENSE
+├── main.cpp
+├── MARS2025+.jar
+├── README.md
+├── scripts
+│   └── test_mips.sh
+└── src
+    ├── backend
+    │   ├── AsmGen.cpp
+    │   └── RegisterAllocator.cpp
+    ├── CMakeLists.txt
+    ├── codegen
+    │   ├── BasicBlock.cpp
+    │   ├── CodeGen.cpp
+    │   ├── Function.cpp
+    │   ├── Instruction.cpp
+    │   ├── Operand.cpp
+    │   └── QuadOptimizer.cpp
+    ├── errorReporter
+    │   └── ErrorReporter.cpp
+    ├── lexer
+    │   └── Lexer.cpp
+    ├── parser
+    │   └── Parser.cpp
+    └── semantic
+        └── SemanticAnalyzer.cpp
 ```
 
-## 词法分析器 (Lexer)
+## 概述
 
-### 设计目标
+LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子集编译器，目标架构为 MIPS。项目采用典型的多阶段编译流水线：
 
-词法分析器负责将源代码字符流转换为 Token 流，为语法分析器提供输入。支持关键字、标识符、运算符、分隔符和字面量的识别。
+- 前端：Lexer（词法分析）→ Parser（语法分析）→ SemanticAnalyzer（语义分析）
+- 中间层：AST → 中间表示 IR（四元式形式），见 `ir.md`
+- 后端：CodeGen（IR 生成与简单优化）→ AsmGen + RegisterAllocator（MIPS 汇编生成），见 `backend.md`
 
-### 词法规则
+本文件作为顶层总览，给出模块划分与主流程，不再展开每个模块的内部细节；具体设计参见对应的子文档：
 
-| 类别 | 模式 | Token 类型 | 示例 |
-|------|------|------------|------|
-| 标识符 | `[a-zA-Z_][a-zA-Z0-9_]*` | `IDENFR` | `count`, `_temp` |
-| 整型常量 | `[0-9]+` | `INTCON` | `42`, `0` |
-| 字符串常量 | `"[^"]*"` | `STRCON` | `"Hello"` |
-| 关键字 | 预定义 | `CONSTTK`, `INTTK` 等 | `const`, `int` |
-| 运算符 | 预定义模式 | `PLUS`, `ASSIGN` 等 | `+`, `=` |
+- `lexer.md`：词法分析器设计
+- `parser.md`：语法分析器与 AST 设计
+- `semantic.md`：语义分析与符号表
+- `ir.md`：中间表示与指令集
+- `backend.md`：后端与寄存器分配
+- `errorReporter.md`：统一错误收集与输出
 
-## 语法分析器 (Parser)
+模块之间的依赖关系为：
 
-### 设计目标
+- `Lexer` 依赖 `Token`
+- `Parser` 依赖 `Lexer` 和 `AST`
+- `SemanticAnalyzer` 依赖 `AST`、`Type`、`SymbolTable`
+- `CodeGen` 依赖语义分析后的 AST 与符号表，生成 IR
+- `Backend`（AsmGen + RegisterAllocator）依赖 IR，生成 MIPS 汇编
+- `ErrorReporter` 被 Lexer/Parser/SemanticAnalyzer 共用，用来集中记录所有错误
 
-语法分析器采用递归下降解析法，将 Token 流转换为抽象语法树 (AST)。支持完整的语法分析、错误恢复和 AST 构建。
+## 编译流水线
 
-### AST 设计
+整个编译过程从源文件 `testfile.txt` 到最终的 MIPS 汇编 `mips.txt`，大致分为以下阶段：
 
-#### 1. AST 节点层次结构
+1. **输入与输出重定向**
+    - 将错误输出重定向到 `error.txt`，用于记录所有阶段产生的错误信息。
+    - 将标准输出重定向到 `ir.txt`，用于记录中间表示（IR）或相关调试信息。
 
-```
-ASTNode (基类)
-├── CompUnit (编译单元)
-├── Decl (声明)
-│   ├── ConstDecl (常量声明)
-│   └── VarDecl (变量声明)
-├── FuncDef (函数定义)
-├── MainFuncDef (主函数定义)
-├── Stmt (语句)
-│   ├── AssignStmt (赋值语句)
-│   ├── ExpStmt (表达式语句)
-│   ├── BlockStmt (复合语句)
-│   ├── IfStmt (条件语句)
-│   ├── ForStmt (循环语句)
-│   ├── BreakStmt (break语句)
-│   ├── ContinueStmt (continue语句)
-│   ├── ReturnStmt (return语句)
-│   └── PrintfStmt (printf语句)
-└── Exp (表达式)
-    ├── LVal (左值)
-    ├── PrimaryExp (基本表达式)
-    ├── UnaryExp (一元表达式)
-    ├── MulExp (乘除模表达式)
-    ├── AddExp (加减表达式)
-    ├── RelExp (关系表达式)
-    ├── EqExp (相等性表达式)
-    ├── LAndExp (逻辑与表达式)
-    └── LOrExp (逻辑或表达式)
-```
+2. **词法分析（Lexer）**
+    - 根据文法定义和保留字表，将源代码字符流切分为 Token 流。
+    - 识别关键字、标识符、各类常量、运算符与分隔符。
+    - 发现非法字符（如单独的 `&`、`|` 等）时，记录错误类型 `a`，通过 ErrorReporter 统一收集。
 
-#### 2. 内存管理
+3. **语法分析（Parser）**
+    - 采用递归下降方式，根据给定的 EBNF 将 Token 流转为 AST。
+    - 维护非终结符的行号信息，为后续错误定位服务。
+    - 在缺分号、右括号等情况下记录 `i/j/k` 类型错误，同时尽量进行错误恢复。
 
-- 使用智能指针 (`std::unique_ptr`) 管理 AST 节点生命周期
-- 采用移动语义传递 AST 节点，避免不必要的拷贝
-- 所有 AST 节点都继承自 `ASTNode` 基类
+4. **语义分析（SemanticAnalyzer）**
+    - 在栈式符号表上完成声明、定义与使用检查。
+    - 检查函数调用的参数个数与类型、返回语句的存在性与类型匹配、常量赋值合法性、循环控制语句位置等。
+    - 将所有 `b`–`m` 类型的语义错误通过 ErrorReporter 统一收集。
+    - 语义分析结束后导出完整的 `SymbolTable`，供 IR 生成阶段使用。
 
-### 解析策略
+5. **错误收集与早期退出**
+    - 若 ErrorReporter 中存在任意错误，则按照行号排序输出到 `error.txt`，并终止后续阶段。
 
-#### 1. 递归下降解析
+6. **IR 生成与优化（CodeGen）**
+    - 在语义分析通过的前提下，从 AST 和符号表生成函数级别 IR：
+      - 构建函数、基本块与四元式指令序列。
+      - 按 `ir.md` 中约定的 OpCode 与操作数规则生成中间代码。
+    - 在 IR 上应用轻量级优化（例如常量折叠与块内死代码删除），具体算法详见 `ir.md` 与 `backend.md` 中的说明。
+    - 汇总得到 IR 模块视图（函数列表、全局变量 IR、字符串字面量表）。
 
-- 每个语法规则对应一个解析函数
-- 左递归消除：通过改写语法规则避免左递归
-- 运算符优先级：通过语法层次结构实现
+7. **后端 MIPS 代码生成（Backend / AsmGen）**
+    - 使用 RegisterAllocator 在函数内为 IR 临时变量分配有限数量的物理寄存器（图着色算法）。
+    - 按函数生成栈帧、保存/恢复必要的寄存器、处理溢出（spill）到栈上的内存槽。
+    - 根据 IR 指令序列生成对应的 MIPS 指令序列，遵循约定的调用约定与运行时辅助例程（如 `printf`、`getint`）。
+    - 最终将 MIPS 汇编输出到 `mips.txt` 文件。
 
-#### 2. 错误恢复
+## 构建系统概览
 
-- **局部话处理**: 遇到错误直接忽略，假装他是正确的，继续往下解析
-- **静默解析**: 错误期间静默临时解析，避免级联错误
+构建系统采用 CMake，核心库目标在 `src/CMakeLists.txt` 中定义，主要包括：
 
-#### 3. 前瞻解析
+- `Lexer`：`lexer/Lexer.cpp`
+- `Parser`：`parser/Parser.cpp`
+- `Semanticanalyzer`：`semantic/SemanticAnalyzer.cpp`
+- `ErrorReporter`：`errorReporter/ErrorReporter.cpp`
+- `Codegen`：IR 构建与相关组件（`CodeGen.cpp`、`Function.cpp`、`BasicBlock.cpp`、`Instruction.cpp`、`Operand.cpp` 等）
+- `Backend`：后端实现（`AsmGen.cpp`、`RegisterAllocator.cpp`）
 
-- 利用 `peekToken()` 进行多 Token 前瞻
-- 支持歧义消解（如赋值语句与表达式语句的区分）
-- 预检查语法构造的合法性
+顶层 `CMakeLists.txt` 将这些库与 `main.cpp` 链接生成最终的可执行文件 `Compiler`。各模块的详细构建与依赖关系可在 `src/CMakeLists.txt` 中查看。
 
-## 编译流程
+## 模块文档索引
 
-### 主程序流程
+本总览文件只提供高层架构图与阶段划分，每个阶段的具体设计与实现细节请参考：
 
-```cpp
-int main() {
-    // 1. 文件 I/O 重定向
-    std::ifstream inputfile("testfile.txt");
-    std::string fileContent = /* 读取文件 */;
+- 词法分析：`lexer.md`
+- 语法分析与 AST：`parser.md`
+- 语义分析与符号表：`semantic.md`
+- 错误收集与输出：`errorReporter.md` 与 `error.md`
+- 中间表示与优化：`ir.md`
+- 后端与寄存器分配：`backend.md`
 
-    // 2. 词法分析
-    Lexer lexer(fileContent);
-    auto firstToken = lexer.nextToken();
-
-    // 3. 语法分析
-    Parser parser(std::move(lexer), firstToken);
-    auto compUnit = parser.parseCompUnit();
-
-    // 4. (未来) 语义分析与代码生成
-
-    return 0;
-}
-```
-
-### 输出格式
-
-- **词法分析输出**: `Token类型 值` 格式，输出到 `parser.txt`
-- **语法分析输出**: `非终结符名称` 格式，输出到 `parser.txt`
-- **错误输出**: `行号 错误类型` 格式，输出到 `error.txt`
-
-## 构建系统
-
-### CMake 配置
-
-```cmake
-cmake_minimum_required(VERSION 3.10)
-project(Compiler)
-set(CMAKE_CXX_STANDARD 17)
-
-include_directories(${PROJECT_SOURCE_DIR}/include)
-
-# 词法分析器库
-add_library(lexer lexer/Lexer.cpp)
-
-# 语法分析器库
-add_library(parser parser/Parser.cpp)
-
-# 主程序
-add_executable(Compiler main.cpp)
-
-target_link_libraries(Compiler lexer parser)
-```
-
-### 构建步骤
-
-```bash
-mkdir build && cd build
-cmake ..
-make
-./Compiler
-```
-
-## 开发指南
-
-### 代码风格
-
-- 使用 Doxygen 风格注释
-- 遵循 Google C++ 编码规范
-- 使用现代 C++ 特性 (C++17)

@@ -8,34 +8,51 @@ Semantic Analyzer（语义分析器）是 LCC 编译器的第三个阶段，负�
 
 ### 类结构
 
+`SemanticAnalyzer` 的对外接口和内部成员在头文件 `SemanticAnalyzer.hpp` 中定义，核心结构如下所示（省略了一些与实现无关的细节）：
+
 ```cpp
 class SemanticAnalyzer {
-private:
-  SymbolTable symbolTable;                        // 符号表
-  int loop = 0;                                   // 循环嵌套深度
-  TypePtr current_function_return_type = nullptr; // 当前函数返回类型
-
-  void error(const int &line, const std::string errorType);
-
 public:
   SemanticAnalyzer();
+
+  // 语义分析入口：从编译单元根节点开始遍历 AST
   void visit(CompUnit *node);
 
+  // 语义分析完成后导出符号表，供后续 CodeGen 使用
+  const SymbolTable &getSymbolTable() const;
+
 private:
+  // 初始化内建函数（printf、getint 等），在全局作用域中插入相应符号
+  void initializeBuiltinFunctions();
+
+  // 语义分析使用的符号表（栈式作用域管理）
+  SymbolTable symbolTable;
+
+  // 当前所在的循环嵌套深度，用于检查 break / continue 是否出现在合法位置
+  int loop = 0;
+
+  // 当前正在检查的函数返回类型，用于验证 return 语句
+  TypePtr current_function_return_type = nullptr;
+
+  // 是否启用与语义分析相关的额外输出（调试用）
+  bool outputenabled = false;
+
+  // 统一的错误上报接口，内部通过 ErrorReporter 收集错误
+  void error(const int &line, const std::string errorType);
+
+  // 下面是一系列针对不同 AST 节点的 visit 重载声明
   void visit(Decl *node);
   void visit(ConstDecl *node);
   void visit(VarDecl *node);
   void visit(ConstDef *node, TypePtr type);
   void visit(VarDef *node, TypePtr type);
-
   void visit(FuncDef *node);
   void visit(MainFuncDef *node);
   void visit(FuncFParams *node);
   void visit(FuncFParam *node);
-  TypePtr visit(FuncType *node);
-
   void visit(Block *node);
   void visit(BlockItem *node);
+
   void visit(Stmt *node);
   void visit(AssignStmt *node);
   void visit(ExpStmt *node);
@@ -48,6 +65,10 @@ private:
   void visit(PrintfStmt *node);
   void visit(ForAssignStmt *node);
 
+  TypePtr visit(BType *node);
+  TypePtr visit(FuncType *node);
+  void visit(ConstInitVal *node);
+  void visit(InitVal *node);
   TypePtr visit(Exp *node);
   TypePtr visit(Cond *node);
   TypePtr visit(LVal *node);
@@ -63,9 +84,6 @@ private:
   TypePtr visit(LAndExp *node);
   TypePtr visit(LOrExp *node);
   TypePtr visit(ConstExp *node);
-
-  void visit(ConstInitVal *node);
-  void visit(InitVal *node);
 };
 ```
 

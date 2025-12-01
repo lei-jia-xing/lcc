@@ -1,5 +1,9 @@
 # LCC: A Lightweight C Compiler
 
+## Project Repository
+
+<https://github.com/lei-jia-xing/lcc>
+
 A simple compiler for a C-like language, built from scratch using C++17 and CMake. This project is an educational exploration into the principles of compiler design and implementation, targeting the MIPS architecture.
 
 ## Project Status

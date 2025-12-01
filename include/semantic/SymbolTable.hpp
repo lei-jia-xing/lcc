@@ -1,7 +1,6 @@
 #pragma once
 #include "semantic/Symbol.hpp"
 #include <iostream>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
