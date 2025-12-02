@@ -1,0 +1,11 @@
+/home/runner/work/lcc/lcc/_codeql_build_dir/CMakeFiles/Compiler.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/CMakeFiles/edit_cache.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/CMakeFiles/rebuild_cache.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/Lexer.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/Parser.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/Semanticanalyzer.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/ErrorReporter.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/Codegen.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/Backend.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/edit_cache.dir
+/home/runner/work/lcc/lcc/_codeql_build_dir/src/CMakeFiles/rebuild_cache.dir

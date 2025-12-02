@@ -1,0 +1,2 @@
+/usr/bin/ar qc libCodegen.a CMakeFiles/Codegen.dir/codegen/CodeGen.cpp.o CMakeFiles/Codegen.dir/codegen/QuadOptimizer.cpp.o CMakeFiles/Codegen.dir/codegen/Function.cpp.o CMakeFiles/Codegen.dir/codegen/BasicBlock.cpp.o CMakeFiles/Codegen.dir/codegen/Instruction.cpp.o CMakeFiles/Codegen.dir/codegen/Operand.cpp.o
+/usr/bin/ranlib libCodegen.a

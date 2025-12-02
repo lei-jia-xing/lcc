@@ -1,0 +1,1 @@
+/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/Compiler.dir/link.d CMakeFiles/Compiler.dir/main.cpp.o -o Compiler  src/libLexer.a src/libParser.a src/libSemanticanalyzer.a src/libErrorReporter.a src/libCodegen.a src/libBackend.a

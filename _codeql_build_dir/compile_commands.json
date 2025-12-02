@@ -1,0 +1,80 @@
+[
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Compiler.dir/main.cpp.o -c /home/runner/work/lcc/lcc/main.cpp",
+  "file": "/home/runner/work/lcc/lcc/main.cpp",
+  "output": "CMakeFiles/Compiler.dir/main.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Lexer.dir/lexer/Lexer.cpp.o -c /home/runner/work/lcc/lcc/src/lexer/Lexer.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/lexer/Lexer.cpp",
+  "output": "src/CMakeFiles/Lexer.dir/lexer/Lexer.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Parser.dir/parser/Parser.cpp.o -c /home/runner/work/lcc/lcc/src/parser/Parser.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/parser/Parser.cpp",
+  "output": "src/CMakeFiles/Parser.dir/parser/Parser.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Semanticanalyzer.dir/semantic/SemanticAnalyzer.cpp.o -c /home/runner/work/lcc/lcc/src/semantic/SemanticAnalyzer.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/semantic/SemanticAnalyzer.cpp",
+  "output": "src/CMakeFiles/Semanticanalyzer.dir/semantic/SemanticAnalyzer.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/ErrorReporter.dir/errorReporter/ErrorReporter.cpp.o -c /home/runner/work/lcc/lcc/src/errorReporter/ErrorReporter.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/errorReporter/ErrorReporter.cpp",
+  "output": "src/CMakeFiles/ErrorReporter.dir/errorReporter/ErrorReporter.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/CodeGen.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/CodeGen.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/CodeGen.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/CodeGen.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/QuadOptimizer.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/QuadOptimizer.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/QuadOptimizer.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/QuadOptimizer.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/Function.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/Function.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/Function.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/Function.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/BasicBlock.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/BasicBlock.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/BasicBlock.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/BasicBlock.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/Instruction.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/Instruction.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/Instruction.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/Instruction.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Codegen.dir/codegen/Operand.cpp.o -c /home/runner/work/lcc/lcc/src/codegen/Operand.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/codegen/Operand.cpp",
+  "output": "src/CMakeFiles/Codegen.dir/codegen/Operand.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Backend.dir/backend/AsmGen.cpp.o -c /home/runner/work/lcc/lcc/src/backend/AsmGen.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/backend/AsmGen.cpp",
+  "output": "src/CMakeFiles/Backend.dir/backend/AsmGen.cpp.o"
+},
+{
+  "directory": "/home/runner/work/lcc/lcc/_codeql_build_dir/src",
+  "command": "/home/runner/work/lcc/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -I/home/runner/work/lcc/lcc/include -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/Backend.dir/backend/RegisterAllocator.cpp.o -c /home/runner/work/lcc/lcc/src/backend/RegisterAllocator.cpp",
+  "file": "/home/runner/work/lcc/lcc/src/backend/RegisterAllocator.cpp",
+  "output": "src/CMakeFiles/Backend.dir/backend/RegisterAllocator.cpp.o"
+}
+]

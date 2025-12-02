@@ -176,66 +176,60 @@ bool LocalDCEPass::run(Function &fn) {
   return changed;
 }
 
+// Helper function to convert an instruction to an ASSIGN
+static void convertToAssign(Instruction &inst, const Operand &src) {
+  inst.setOp(OpCode::ASSIGN);
+  inst.setArg1(src);
+  inst.setArg2(Operand());
+}
+
 bool AlgebraicSimplifyPass::run(Function &fn) {
   bool changed = false;
   for (auto &blk : fn.getBlocks()) {
     auto &insts = blk->getInstructions();
     for (auto &inst : insts) {
       auto op = inst.getOp();
-      auto c1 = getConst(inst.getArg1());
-      auto c2 = getConst(inst.getArg2());
 
       // x + 0 = x or 0 + x = x
       if (op == OpCode::ADD) {
+        auto c1 = getConst(inst.getArg1());
+        auto c2 = getConst(inst.getArg2());
         if (c1 && *c1 == 0) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg1(inst.getArg2());
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg2());
           changed = true;
         } else if (c2 && *c2 == 0) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg1());
           changed = true;
         }
       }
       // x - 0 = x
       else if (op == OpCode::SUB) {
+        auto c2 = getConst(inst.getArg2());
         if (c2 && *c2 == 0) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg1());
           changed = true;
         }
       }
-      // x * 1 = x or 1 * x = x
+      // x * 1 = x, 1 * x = x, x * 0 = 0, 0 * x = 0
       else if (op == OpCode::MUL) {
+        auto c1 = getConst(inst.getArg1());
+        auto c2 = getConst(inst.getArg2());
         if (c1 && *c1 == 1) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg1(inst.getArg2());
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg2());
           changed = true;
         } else if (c2 && *c2 == 1) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg1());
           changed = true;
-        }
-        // x * 0 = 0 or 0 * x = 0
-        else if (c1 && *c1 == 0) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg1(Operand::ConstantInt(0));
-          inst.setArg2(Operand());
-          changed = true;
-        } else if (c2 && *c2 == 0) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg1(Operand::ConstantInt(0));
-          inst.setArg2(Operand());
+        } else if ((c1 && *c1 == 0) || (c2 && *c2 == 0)) {
+          convertToAssign(inst, Operand::ConstantInt(0));
           changed = true;
         }
       }
       // x / 1 = x
       else if (op == OpCode::DIV) {
+        auto c2 = getConst(inst.getArg2());
         if (c2 && *c2 == 1) {
-          inst.setOp(OpCode::ASSIGN);
-          inst.setArg2(Operand());
+          convertToAssign(inst, inst.getArg1());
           changed = true;
         }
       }
