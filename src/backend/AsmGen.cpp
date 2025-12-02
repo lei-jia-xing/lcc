@@ -310,9 +310,9 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     int offCaller =
         frameSize_ + (i - 4) * 4; // jump out current frame to the previous
                                   // frame's stack to get extra params
-    std::string tempReg = allocateScratch();
-    out << "  lw " << tempReg << ", " << offCaller << "($fp)\n";
-    out << "  sw " << tempReg << ", " << offLocal << "($fp)\n";
+
+    out << "  lw $t0, " << offCaller << "($fp)\n";
+    out << "  sw $t0, " << offLocal << "($fp)\n";
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
