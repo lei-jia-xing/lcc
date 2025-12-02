@@ -419,9 +419,10 @@ void CodeGen::genStmt(Stmt *stmt) {
 void CodeGen::genAssign(AssignStmt *stmt) {
   if (!stmt)
     return;
+
+  Operand rhs = genExp(stmt->exp.get());
   Operand idx;
   Operand baseOrValue = genLVal(stmt->lval.get(), &idx);
-  Operand rhs = genExp(stmt->exp.get());
   if (idx.getType() != OperandType::Empty) {
     auto sym = stmt->lval->symbol; // Use symbol from AST node
     emit(Instruction::MakeStore(rhs, Operand::Variable(sym), idx));

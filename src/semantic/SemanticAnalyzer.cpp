@@ -494,9 +494,7 @@ void SemanticAnalyzer::visit(UnaryOp *node) {
 std::vector<TypePtr> SemanticAnalyzer::visit(FuncRParams *node) {
   if (node == nullptr)
     return {};
-  // Prevent accumulation when node visited multiple times (avoids duplicate 'e'
-  // and potential OOB)
-  node->types.clear();
+
   for (auto &exp : node->exps) {
     node->types.push_back(visit(exp.get()));
   }
