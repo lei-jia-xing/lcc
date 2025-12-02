@@ -1,2 +1,0 @@
-/usr/bin/ar qc libSemanticanalyzer.a CMakeFiles/Semanticanalyzer.dir/semantic/SemanticAnalyzer.cpp.o
-/usr/bin/ranlib libSemanticanalyzer.a
