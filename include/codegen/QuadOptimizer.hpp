@@ -38,4 +38,11 @@ class LocalDCEPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
+
+// Algebraic simplification pass: simplifies identities like x+0=x, x*1=x, etc.
+class AlgebraicSimplifyPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
 void runDefaultQuadOptimizations(Function &fn);

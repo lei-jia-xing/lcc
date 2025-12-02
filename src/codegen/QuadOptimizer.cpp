@@ -176,9 +176,78 @@ bool LocalDCEPass::run(Function &fn) {
   return changed;
 }
 
+bool AlgebraicSimplifyPass::run(Function &fn) {
+  bool changed = false;
+  for (auto &blk : fn.getBlocks()) {
+    auto &insts = blk->getInstructions();
+    for (auto &inst : insts) {
+      auto op = inst.getOp();
+      auto c1 = getConst(inst.getArg1());
+      auto c2 = getConst(inst.getArg2());
+
+      // x + 0 = x or 0 + x = x
+      if (op == OpCode::ADD) {
+        if (c1 && *c1 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(inst.getArg2());
+          inst.setArg2(Operand());
+          changed = true;
+        } else if (c2 && *c2 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // x - 0 = x
+      else if (op == OpCode::SUB) {
+        if (c2 && *c2 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // x * 1 = x or 1 * x = x
+      else if (op == OpCode::MUL) {
+        if (c1 && *c1 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(inst.getArg2());
+          inst.setArg2(Operand());
+          changed = true;
+        } else if (c2 && *c2 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+        // x * 0 = 0 or 0 * x = 0
+        else if (c1 && *c1 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(Operand::ConstantInt(0));
+          inst.setArg2(Operand());
+          changed = true;
+        } else if (c2 && *c2 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(Operand::ConstantInt(0));
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // x / 1 = x
+      else if (op == OpCode::DIV) {
+        if (c2 && *c2 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
 void runDefaultQuadOptimizations(Function &fn) {
   PassManager pm;
   pm.add(std::make_unique<ConstFoldPass>());
+  pm.add(std::make_unique<AlgebraicSimplifyPass>());
   pm.add(std::make_unique<LocalDCEPass>());
   pm.run(fn);
 }

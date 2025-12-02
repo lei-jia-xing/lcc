@@ -1,5 +1,6 @@
 #include "backend/AsmGen.hpp"
 #include "codegen/CodeGen.hpp"
+#include "codegen/QuadOptimizer.hpp"
 #include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
@@ -48,6 +49,11 @@ int main() {
   if (compUnit) {
     CodeGen cg(semanticAnalyzer.getSymbolTable());
     cg.generate(compUnit.get());
+
+    // Run optimization passes on all functions
+    for (const auto &fp : cg.getFunctions()) {
+      runDefaultQuadOptimizations(*fp);
+    }
 
     IRModuleView mod;
     for (const auto &fp : cg.getFunctions()) {
