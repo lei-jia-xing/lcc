@@ -1,11 +1,15 @@
 #include "backend/AsmGen.hpp"
 #include "codegen/CodeGen.hpp"
+#include "codegen/QuadOptimizer.hpp"
 #include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
 #include "semantic/SemanticAnalyzer.hpp"
 #include <fstream>
 #include <iostream>
+
+// Optimization switch: set to true to enable IR optimizations
+constexpr bool ENABLE_OPTIMIZATION = true;
 
 int main() {
   std::ofstream errorfile("error.txt");
@@ -48,6 +52,13 @@ int main() {
   if (compUnit) {
     CodeGen cg(semanticAnalyzer.getSymbolTable());
     cg.generate(compUnit.get());
+
+    // Apply IR optimizations if enabled
+    if constexpr (ENABLE_OPTIMIZATION) {
+      for (const auto &fp : cg.getFunctions()) {
+        runDefaultQuadOptimizations(*fp);
+      }
+    }
 
     IRModuleView mod;
     for (const auto &fp : cg.getFunctions()) {

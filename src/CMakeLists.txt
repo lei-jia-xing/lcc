@@ -4,7 +4,7 @@ add_library(Semanticanalyzer semantic/SemanticAnalyzer.cpp)
 add_library(ErrorReporter errorReporter/ErrorReporter.cpp)
 add_library(Codegen
     codegen/CodeGen.cpp
-    # codegen/QuadOptimizer.cpp
+    codegen/QuadOptimizer.cpp
     codegen/Function.cpp
     codegen/BasicBlock.cpp
     codegen/Instruction.cpp

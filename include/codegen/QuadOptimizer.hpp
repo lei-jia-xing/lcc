@@ -29,13 +29,19 @@ private:
   std::vector<std::unique_ptr<QuadPass>> passes;
 };
 
-class ConstFoldPass : public QuadPass {
-public:
-  bool run(Function &fn) override;
-};
-
 class LocalDCEPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
+
+class ConstPropPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
+class AlgebraicSimplifyPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
 void runDefaultQuadOptimizations(Function &fn);

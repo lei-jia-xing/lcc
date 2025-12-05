@@ -1,17 +1,6 @@
 #include "codegen/QuadOptimizer.hpp"
 #include "codegen/Instruction.hpp"
-#include <optional>
 #include <unordered_map>
-
-static bool isConst(const Operand &op) {
-  return op.getType() == OperandType::ConstantInt;
-}
-
-static std::optional<int> getConst(const Operand &op) {
-  if (!isConst(op))
-    return std::nullopt;
-  return op.asInt();
-}
 
 static bool hasSideEffect(OpCode op) {
   switch (op) {
@@ -23,121 +12,11 @@ static bool hasSideEffect(OpCode op) {
   case OpCode::RETURN:
   case OpCode::PARAM:
   case OpCode::ALLOCA:
+  case OpCode::ARG:
     return true;
   default:
     return false;
   }
-}
-
-static std::optional<int> evalBinary(OpCode op, int a, int b) {
-  switch (op) {
-  case OpCode::ADD:
-    return a + b;
-  case OpCode::SUB:
-    return a - b;
-  case OpCode::MUL:
-    return a * b;
-  case OpCode::DIV:
-    if (b != 0)
-      return a / b;
-    else
-      return std::nullopt;
-  case OpCode::MOD:
-    if (b != 0)
-      return a % b;
-    else
-      return std::nullopt;
-  case OpCode::EQ:
-    return a == b;
-  case OpCode::NEQ:
-    return a != b;
-  case OpCode::LT:
-    return a < b;
-  case OpCode::LE:
-    return a <= b;
-  case OpCode::GT:
-    return a > b;
-  case OpCode::GE:
-    return a >= b;
-  case OpCode::AND:
-    return (a != 0) && (b != 0);
-  case OpCode::OR:
-    return (a != 0) || (b != 0);
-  default:
-    return std::nullopt;
-  }
-}
-
-static std::optional<int> evalUnary(OpCode op, int a) {
-  switch (op) {
-  case OpCode::NEG:
-    return -a;
-  case OpCode::NOT:
-    return !a;
-  default:
-    return std::nullopt;
-  }
-}
-
-bool ConstFoldPass::run(Function &fn) {
-  bool changed = false;
-  for (auto &blk : fn.getBlocks()) {
-    auto &insts = blk->getInstructions();
-    for (auto &inst : insts) {
-      auto op = inst.getOp();
-      // 二元
-      if (op == OpCode::ADD || op == OpCode::SUB || op == OpCode::MUL ||
-          op == OpCode::DIV || op == OpCode::MOD || op == OpCode::EQ ||
-          op == OpCode::NEQ || op == OpCode::LT || op == OpCode::LE ||
-          op == OpCode::GT || op == OpCode::GE || op == OpCode::AND ||
-          op == OpCode::OR) {
-        if (isConst(inst.getArg1()) && isConst(inst.getArg2())) {
-          auto ca = inst.getArg1().asInt();
-          auto cb = inst.getArg2().asInt();
-          if (auto res = evalBinary(op, ca, cb)) {
-            inst.setOp(OpCode::ASSIGN);
-            inst.setArg1(Operand::ConstantInt(*res));
-            inst.setArg2(Operand());
-            changed = true;
-          }
-        }
-      }
-      // 一元
-      else if (op == OpCode::NEG || op == OpCode::NOT) {
-        if (isConst(inst.getArg1())) {
-          if (auto res = evalUnary(op, inst.getArg1().asInt())) {
-            inst.setOp(OpCode::ASSIGN);
-            inst.setArg1(Operand::ConstantInt(*res));
-            inst.setArg2(Operand());
-            changed = true;
-          }
-        }
-      }
-      // 恒真/恒假跳转
-      else if (op == OpCode::IF) {
-        if (isConst(inst.getArg1())) {
-          int cond = inst.getArg1().asInt();
-          if (cond == 0) {
-            // 条件恒假: 去掉跳转 => 变成 no-op (ASSIGN cond -> 临时保持占位)
-            inst.setOp(OpCode::ASSIGN);
-            inst.setArg2(Operand());
-            inst.setResult(Operand());
-            changed = true;
-          } else {
-            // 条件恒真: 变为无条件跳转
-            inst.setOp(OpCode::GOTO);
-            // 将 label 放在 result 位置 => 我们当前 IF 格式: IF cond, label
-            // 构造新指令: GOTO label
-            inst.setArg1(inst.getArg2()); // label 移动到 arg1
-            inst.setArg2(Operand());
-            inst.setResult(Operand());
-            changed = true;
-          }
-        }
-      }
-    }
-  }
-  return changed;
 }
 
 bool LocalDCEPass::run(Function &fn) {
@@ -152,33 +31,187 @@ bool LocalDCEPass::run(Function &fn) {
       };
       addUse(inst.getArg1());
       addUse(inst.getArg2());
+
+      // RETURN: result field is a "use" (the return value)
+      // Format: RETURN -, -, res(var|temp|const)
+      if (inst.getOp() == OpCode::RETURN) {
+        addUse(inst.getResult());
+      }
     }
 
     auto &insts = blk->getInstructions();
-    // 反向遍历，删除无用指令
     for (int i = (int)insts.size() - 1; i >= 0; --i) {
       auto &inst = insts[i];
-      // 仅删除产生临时结果且无副作用的指令
       if (!hasSideEffect(inst.getOp()) &&
           inst.getResult().getType() == OperandType::Temporary) {
         int t = inst.getResult().asInt();
         if (useCount[t] == 0) {
-          // 删除该指令
           insts.erase(insts.begin() + i);
           changed = true;
           continue;
         }
       }
-      // 更新使用计数：如果是赋值到 tX
-      // 且我们删除/保留都需要正确传播，这里不做复杂传播，保留简单模型
     }
   }
   return changed;
 }
 
+// Local constant propagation: propagate constants within a basic block
+bool ConstPropPass::run(Function &fn) {
+  bool changed = false;
+  for (auto &blk : fn.getBlocks()) {
+    // Map from temporary id to constant value
+    std::unordered_map<int, int> constMap;
+
+    for (auto &inst : blk->getInstructions()) {
+      auto op = inst.getOp();
+
+      // Helper to replace operand if it's a known constant
+      auto tryReplace = [&](Operand &operand) {
+        if (operand.getType() == OperandType::Temporary) {
+          int tid = operand.asInt();
+          auto it = constMap.find(tid);
+          if (it != constMap.end()) {
+            operand = Operand::ConstantInt(it->second);
+            changed = true;
+          }
+        }
+      };
+
+      // Replace uses in arg1 and arg2
+      Operand arg1 = inst.getArg1();
+      Operand arg2 = inst.getArg2();
+      tryReplace(arg1);
+      tryReplace(arg2);
+      if (arg1.getType() != inst.getArg1().getType() ||
+          (arg1.getType() == OperandType::ConstantInt &&
+           arg1.asInt() != inst.getArg1().asInt())) {
+        inst.setArg1(arg1);
+      }
+      if (arg2.getType() != inst.getArg2().getType() ||
+          (arg2.getType() == OperandType::ConstantInt &&
+           arg2.asInt() != inst.getArg2().asInt())) {
+        inst.setArg2(arg2);
+      }
+
+      // Track constant assignments: ASSIGN const -> temp
+      if (op == OpCode::ASSIGN) {
+        const Operand &src = inst.getArg1();
+        const Operand &dst = inst.getResult();
+        if (dst.getType() == OperandType::Temporary) {
+          int tid = dst.asInt();
+          if (src.getType() == OperandType::ConstantInt) {
+            // Record this temp as having a constant value
+            constMap[tid] = src.asInt();
+          } else {
+            // temp is assigned a non-constant, invalidate
+            constMap.erase(tid);
+          }
+        }
+      }
+      // For other instructions that define a temp, invalidate it
+      else if (inst.getResult().getType() == OperandType::Temporary) {
+        constMap.erase(inst.getResult().asInt());
+      }
+    }
+  }
+  return changed;
+}
+
+bool AlgebraicSimplifyPass::run(Function &fn) {
+  bool changed = false;
+
+  for (auto &blk : fn.getBlocks()) {
+    for (auto &inst : blk->getInstructions()) {
+      OpCode op = inst.getOp();
+      const Operand &arg1 = inst.getArg1();
+      const Operand &arg2 = inst.getArg2();
+      const Operand &result = inst.getResult();
+
+      bool isArg1Const =
+          arg1.getType() == OperandType::ConstantInt;
+      bool isArg2Const =
+          arg2.getType() == OperandType::ConstantInt;
+      int c1 = isArg1Const ? arg1.asInt() : 0;
+      int c2 = isArg2Const ? arg2.asInt() : 0;
+
+      // ADD optimizations
+      if (op == OpCode::ADD) {
+        // x + 0 -> x
+        if (isArg2Const && c2 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+        // 0 + x -> x
+        else if (isArg1Const && c1 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(arg2);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // SUB optimizations
+      else if (op == OpCode::SUB) {
+        // x - 0 -> x
+        if (isArg2Const && c2 == 0) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // MUL optimizations
+      else if (op == OpCode::MUL) {
+        // x * 0 -> 0, 0 * x -> 0
+        if ((isArg1Const && c1 == 0) || (isArg2Const && c2 == 0)) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(Operand::ConstantInt(0));
+          inst.setArg2(Operand());
+          changed = true;
+        }
+        // x * 1 -> x
+        else if (isArg2Const && c2 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+        // 1 * x -> x
+        else if (isArg1Const && c1 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(arg2);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // DIV optimizations
+      else if (op == OpCode::DIV) {
+        // x / 1 -> x
+        if (isArg2Const && c2 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+      // MOD optimizations
+      else if (op == OpCode::MOD) {
+        // x % 1 -> 0
+        if (isArg2Const && c2 == 1) {
+          inst.setOp(OpCode::ASSIGN);
+          inst.setArg1(Operand::ConstantInt(0));
+          inst.setArg2(Operand());
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return changed;
+}
+
 void runDefaultQuadOptimizations(Function &fn) {
   PassManager pm;
-  pm.add(std::make_unique<ConstFoldPass>());
-  pm.add(std::make_unique<LocalDCEPass>());
+  pm.add(std::make_unique<ConstPropPass>());
+  pm.add(std::make_unique<AlgebraicSimplifyPass>());
+  // pm.add(std::make_unique<LocalDCEPass>());
   pm.run(fn);
 }
