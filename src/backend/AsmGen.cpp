@@ -6,6 +6,18 @@
 #include "semantic/Type.hpp"
 #include <iostream>
 
+// Check if n is a power of 2 and return the exponent, or -1 if not
+static int log2IfPowerOf2(int n) {
+  if (n <= 0)
+    return -1;
+  if ((n & (n - 1)) != 0)
+    return -1; // Not a power of 2
+  int exp = 0;
+  while ((n >> exp) != 1)
+    ++exp;
+  return exp;
+}
+
 AsmGen::AsmGen() {
   static const char *Regs[NUM_ALLOCATABLE_REGS] = {"$s0", "$s1", "$s2", "$s3",
                                                    "$s4", "$s5", "$s6", "$s7"};
@@ -456,10 +468,60 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
     break;
   }
+  case OpCode::MUL: {
+    // MUL arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+    // 2^n * x | x * 2^n with shift optimization
+    std::string rd = getResultReg(res);
+
+    if (isConst(a2)) {
+      int val = a2.asInt();
+      int shift = log2IfPowerOf2(val);
+      if (shift >= 0) {
+        std::string ra = getRegister(a1, out);
+        out << "  sll " << rd << ", " << ra << ", " << shift << "\n";
+        if (isTemp(res)) {
+          storeToSpill(res.asInt(), rd);
+        }
+        break;
+      }
+    }
+    if (isConst(a1)) {
+      int val = a1.asInt();
+      int shift = log2IfPowerOf2(val);
+      if (shift >= 0) {
+        std::string rb = getRegister(a2, out);
+        out << "  sll " << rd << ", " << rb << ", " << shift << "\n";
+        if (isTemp(res)) {
+          storeToSpill(res.asInt(), rd);
+        }
+        break;
+      }
+    }
+
+    // Fall back to regular multiplication
+      std::string ra = getRegister(a1, out);
+      std::string rb = getRegister(a2, out);
+      out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
+      if (isTemp(res)) {
+        storeToSpill(res.asInt(), rd);
+      }
+
+    break;
+  }
+  case OpCode::DIV: {
+    // DIV arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+    std::string rd = getResultReg(res);
+    std::string ra = getRegister(a1, out);
+    std::string rb = getRegister(a2, out);
+    out << "  div " << ra << ", " << rb << "\n";
+    out << "  mflo " << rd << "\n";
+    if (isTemp(res)) {
+      storeToSpill(res.asInt(), rd);
+    }
+    break;
+  }
   case OpCode::ADD:
   case OpCode::SUB:
-  case OpCode::MUL:
-  case OpCode::DIV:
   case OpCode::MOD: {
     // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
@@ -472,13 +534,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       break;
     case OpCode::SUB:
       out << "  subu " << rd << ", " << ra << ", " << rb << "\n";
-      break;
-    case OpCode::MUL:
-      out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
-      break;
-    case OpCode::DIV:
-      out << "  div " << ra << ", " << rb << "\n";
-      out << "  mflo " << rd << "\n";
       break;
     case OpCode::MOD:
       out << "  div " << ra << ", " << rb << "\n";
