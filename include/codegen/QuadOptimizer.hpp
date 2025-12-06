@@ -29,17 +29,60 @@ private:
   std::vector<std::unique_ptr<QuadPass>> passes;
 };
 
+/**
+ * @class LocalDCEPass
+ * @brief Dead Code Elimination in funtion scope
+ *
+ */
 class LocalDCEPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
 
+/**
+ * @class ConstPropPass
+ * @brief const propagation in function scope
+ * if a temp is assigned a constant value and
+ * never modified, we can replace all its uses
+ * with the constant value.
+ * for example:
+ *    int a = 5;
+ *    int b = a + 3;
+ * we can replace 'a' with '5' in the second
+ * line,and b can be computed at compile time.
+ *
+ */
 class ConstPropPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
 
+/**
+ * @class AlgebraicSimplifyPass
+ * @brief simplify algebraic expressions
+ * x + 0, 0 + x  -> x
+ * x - 0 -> x
+ * x * 0, 0 * x -> x
+ * x * 1, 1 * x -> x
+ * x / 1 -> x
+ * x % 1 -> 0, only int
+ *
+ */
 class AlgebraicSimplifyPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
+/**
+ * @class CopyPropPass
+ * @brief copy propagation in function scope
+ * example:
+ *    t0 = a
+ *    t1 = t0
+ * we can replace t1 with a directly.
+ *
+ */
+class CopyPropPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
