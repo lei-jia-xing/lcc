@@ -8,8 +8,10 @@ class BasicBlock {
 public:
   explicit BasicBlock(int id);
 
-  void addInstruction(Instruction inst);
-  std::vector<Instruction> &getInstructions();
+  void addInstruction(std::unique_ptr<Instruction> inst);
+  std::vector<std::unique_ptr<Instruction>> &getInstructions();
+  const std::vector<std::unique_ptr<Instruction>> &getInstructions() const;
+
 
   int getId() const;
 
@@ -18,5 +20,5 @@ public:
 
 private:
   int _id;
-  std::vector<Instruction> _instructions;
+  std::vector<std::unique_ptr<Instruction>> _instructions;
 };

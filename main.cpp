@@ -60,13 +60,24 @@ int main() {
       }
     }
 
+    // Output optimized IR to ir.txt
+    for (const auto &fp : cg.getFunctions()) {
+      for (const auto &blk : fp->getBlocks()) {
+        for (const auto &inst : blk->getInstructions()) {
+          if (inst) {
+            std::cout << inst->toString() << '\n';
+          }
+        }
+      }
+    }
+
     IRModuleView mod;
     for (const auto &fp : cg.getFunctions()) {
       mod.functions.push_back(fp.get());
     }
     const auto &globals = cg.getGlobalsIR();
     for (size_t i = 0; i < globals.size(); ++i) {
-      mod.globals.push_back(&globals[i]);
+      mod.globals.push_back(globals[i].get());
     }
     for (const auto &kv : cg.getStringLiteralSymbols()) {
       auto &literal = kv.first;

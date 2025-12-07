@@ -8,7 +8,10 @@ add_library(Codegen
     codegen/Function.cpp
     codegen/BasicBlock.cpp
     codegen/Instruction.cpp
-    codegen/Operand.cpp)
+    codegen/Operand.cpp
+    optimize/DominatorTree.cpp
+    optimize/LoopAnalysis.cpp
+    optimize/LICM.cpp)
 
 add_library(Backend
     backend/AsmGen.cpp

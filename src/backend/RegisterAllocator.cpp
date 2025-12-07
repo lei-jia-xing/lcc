@@ -57,14 +57,14 @@ void RegisterAllocator::computeUseDef(Function *func) {
         }
       };
 
-      checkUse(inst.getArg1());
-      checkUse(inst.getArg2());
-      if (inst.getOp() == OpCode::STORE) {
+      checkUse(inst->getArg1());
+      checkUse(inst->getArg2());
+      if (inst->getOp() == OpCode::STORE) {
         // result of STORE is index, is use, not def
-        checkUse(inst.getResult());
+        checkUse(inst->getResult());
       } else {
-        if (inst.getResult().getType() == OperandType::Temporary) {
-          int tempId = inst.getResult().asInt();
+        if (inst->getResult().getType() == OperandType::Temporary) {
+          int tempId = inst->getResult().asInt();
           _def[block.get()].insert(tempId);
           definedInBlock.insert(tempId);
           _temps.insert(tempId);
@@ -133,9 +133,9 @@ void RegisterAllocator::buildInterferenceGraph(Function *func) {
     for (auto it = block->getInstructions().rbegin();
          it != block->getInstructions().rend(); ++it) {
       auto &inst = *it;
-      if (inst.getOp() != OpCode::STORE) {
-        if (inst.getResult().getType() == OperandType::Temporary) {
-          int def = inst.getResult().asInt();
+      if (inst->getOp() != OpCode::STORE) {
+        if (inst->getResult().getType() == OperandType::Temporary) {
+          int def = inst->getResult().asInt();
           for (int t : live) {
             if (def != t) {
               _interferenceGraph[def].insert(t);
@@ -151,10 +151,10 @@ void RegisterAllocator::buildInterferenceGraph(Function *func) {
           live.insert(op.asInt());
         }
       };
-      addLive(inst.getArg1());
-      addLive(inst.getArg2());
-      if (inst.getOp() == OpCode::STORE) {
-        addLive(inst.getResult());
+      addLive(inst->getArg1());
+      addLive(inst->getArg2());
+      if (inst->getOp() == OpCode::STORE) {
+        addLive(inst->getResult());
       }
     }
   }

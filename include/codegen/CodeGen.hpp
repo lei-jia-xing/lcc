@@ -25,7 +25,9 @@ public:
   const std::vector<std::shared_ptr<Function>> &getFunctions() const {
     return functions_;
   }
-  const std::vector<Instruction> &getGlobalsIR() const { return globalsIR_; }
+  const std::vector<std::unique_ptr<Instruction>> &getGlobalsIR() const {
+    return globalsIR_;
+  }
   const std::unordered_map<std::string, std::shared_ptr<Symbol>> &
   getStringLiteralSymbols() const {
     return stringLiterals_;
@@ -71,8 +73,8 @@ private:
   Operand genLOr(LOrExp *lo);
   std::vector<Operand> genFuncRParams(FuncRParams *params);
 
-  void emit(const Instruction &inst);
-  void emitGlobal(const Instruction &inst);
+  void emit(std::unique_ptr<Instruction> inst);
+  void emitGlobal(std::unique_ptr<Instruction> inst);
   Operand newTemp();
   Operand newLabel();
   void placeLabel(const Operand &label);
@@ -159,7 +161,7 @@ private:
   /**
    * @brief simple ir output control flag
    */
-  bool outputEnabled_ = true;
+  bool outputEnabled_ = false;
   /**
    * @brief record of defined global variables to avoid duplicate definitions
    */
@@ -180,7 +182,10 @@ private:
   /**
    * @brief global IR instructions (for global variable definitions)
    */
-  std::vector<Instruction> globalsIR_;
+  std::vector<std::unique_ptr<Instruction>> globalsIR_;
+  /**
+   * @brief global list of functions in the module
+   */
   std::vector<std::shared_ptr<Function>> functions_;
   /**
    * @brief push current loop context onto the loop stack(where break/continue

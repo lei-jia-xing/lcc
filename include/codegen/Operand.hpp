@@ -22,6 +22,17 @@ public:
   const std::shared_ptr<Symbol> &asSymbol() const; // Variable
   int asInt() const; // Temporary / ConstantInt / Label id
 
+  bool operator==(const Operand &other) const {
+    if (_type != other._type)
+      return false;
+    if (_type == OperandType::Empty)
+      return true;
+    if (_type == OperandType::Variable) {
+      return asSymbol() == other.asSymbol();
+    }
+    return asInt() == other.asInt();
+  }
+
 private:
   Operand(OperandType t, std::variant<std::shared_ptr<Symbol>, int> val);
   OperandType _type;

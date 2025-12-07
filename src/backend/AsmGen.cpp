@@ -352,7 +352,7 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
-      lowerInstruction(&inst, out);
+      lowerInstruction(inst.get(), out);
     }
   }
   out << currentEpilogueLabel_ << ":\n";
@@ -499,17 +499,21 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
 
     // Fall back to regular multiplication
-      std::string ra = getRegister(a1, out);
-      std::string rb = getRegister(a2, out);
-      out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
-      if (isTemp(res)) {
-        storeToSpill(res.asInt(), rd);
-      }
+    std::string ra = getRegister(a1, out);
+    std::string rb = getRegister(a2, out);
+    out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
+    if (isTemp(res)) {
+      storeToSpill(res.asInt(), rd);
+    }
 
     break;
   }
   case OpCode::DIV: {
     // DIV arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+    // NOTE:
+    // In present don't shift in division optimization,
+    // for example -5 / 2 -> -5 >> 1 = -3 which is Wrong
+    // it remians to be optimized in future if needed
     std::string rd = getResultReg(res);
     std::string ra = getRegister(a1, out);
     std::string rb = getRegister(a2, out);
@@ -1048,13 +1052,13 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
   bool isFirstBlock = true;
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
-      auto op = inst.getOp();
+      auto op = inst->getOp();
       if (op == OpCode::LABEL) {
         continue;
       }
       if (isFirstBlock && op == OpCode::PARAM) {
-        const auto &a1 = inst.getArg1();
-        const auto &res = inst.getResult();
+        const auto &a1 = inst->getArg1();
+        const auto &res = inst->getResult();
         if (inEntryParamRun && a1.getType() == OperandType::ConstantInt &&
             res.getType() == OperandType::Variable) {
           int idx = a1.asInt();
@@ -1072,10 +1076,10 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
         }
       }
       if (op == OpCode::ALLOCA) {
-        const auto &sym = inst.getArg1();
+        const auto &sym = inst->getArg1();
         int sz = 1;
-        if (inst.getResult().getType() == OperandType::ConstantInt) {
-          sz = inst.getResult().asInt();
+        if (inst->getResult().getType() == OperandType::ConstantInt) {
+          sz = inst->getResult().asInt();
         }
         if (sym.getType() == OperandType::Variable) {
           auto sp = sym.asSymbol().get();

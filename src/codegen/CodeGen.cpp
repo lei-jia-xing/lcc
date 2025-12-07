@@ -4,6 +4,7 @@
 #include "parser/AST.hpp"
 #include "semantic/Symbol.hpp"
 #include <iostream>
+#include <memory>
 
 CodeGen::CodeGen(const SymbolTable &symbolTable) : symbolTable_(&symbolTable) {}
 
@@ -25,7 +26,7 @@ Operand CodeGen::newTemp() { return Operand::Temporary(ctx_.nextTempId++); }
 Operand CodeGen::newLabel() { return Operand::Label(ctx_.nextLabelId++); }
 
 void CodeGen::placeLabel(const Operand &label) {
-  emit(Instruction::MakeLabel(label));
+  emit(std::make_unique<Instruction>(Instruction::MakeLabel(label)));
 }
 
 void CodeGen::output(const std::string &line) {
@@ -264,22 +265,22 @@ void CodeGen::generate(CompUnit *root) {
     genMainFuncDef(root->mainFuncDef.get());
   }
   for (auto &inst : globalsIR_) {
-    output(inst.toString());
+    output(inst->toString());
   }
 }
 
-void CodeGen::emit(const Instruction &inst) {
+void CodeGen::emit(std::unique_ptr<Instruction> inst) {
   if (ctx_.curBlk) {
     // local
-    ctx_.curBlk->addInstruction(inst);
+    ctx_.curBlk->addInstruction(std::move(inst));
   } else {
     // global
-    globalsIR_.push_back(inst);
+    globalsIR_.push_back(std::move(inst));
   }
 }
 
-void CodeGen::emitGlobal(const Instruction &inst) {
-  globalsIR_.push_back(inst);
+void CodeGen::emitGlobal(std::unique_ptr<Instruction> inst) {
+  globalsIR_.push_back(std::move(inst));
 }
 
 void CodeGen::genFunction(FuncDef *funcDef) {
@@ -306,8 +307,8 @@ void CodeGen::genFunction(FuncDef *funcDef) {
     for (auto &p : funcDef->params->params) {
       auto sym = p->symbol; // Use symbol from AST node
       if (sym) {
-        emit(Instruction::MakeParam(Operand::ConstantInt(idx),
-                                    Operand::Variable(sym)));
+        emit(std::make_unique<Instruction>(Instruction::MakeParam(
+            Operand::ConstantInt(idx), Operand::Variable(sym))));
       }
       idx++;
     }
@@ -317,9 +318,12 @@ void CodeGen::genFunction(FuncDef *funcDef) {
     genBlock(funcDef->block.get());
   }
 
+  // Build CFG after all instructions are emitted
+  funcPtr->buildCFG();
+
   for (auto &blk : funcPtr->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
-      output(inst.toString());
+      output(inst->toString());
     }
   }
 
@@ -348,9 +352,12 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
     genBlock(mainDef->block.get());
   }
 
+  // Build CFG after all instructions are emitted
+  funcPtr->buildCFG();
+
   for (auto &blk : funcPtr->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
-      output(inst.toString());
+      output(inst->toString());
     }
   }
 
@@ -425,9 +432,11 @@ void CodeGen::genAssign(AssignStmt *stmt) {
   Operand baseOrValue = genLVal(stmt->lval.get(), &idx);
   if (idx.getType() != OperandType::Empty) {
     auto sym = stmt->lval->symbol; // Use symbol from AST node
-    emit(Instruction::MakeStore(rhs, Operand::Variable(sym), idx));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeStore(rhs, Operand::Variable(sym), idx)));
   } else {
-    emit(Instruction::MakeAssign(rhs, baseOrValue));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeAssign(rhs, baseOrValue)));
   }
 }
 void CodeGen::genExpStmt(ExpStmt *stmt) {
@@ -453,7 +462,7 @@ void CodeGen::genIf(IfStmt *stmt) {
   if (stmt->thenStmt) {
     genStmt(stmt->thenStmt.get());
   }
-  emit(Instruction::MakeGoto(endLabel));
+  emit(std::make_unique<Instruction>(Instruction::MakeGoto(endLabel)));
 
   placeLabel(falseLabel);
   if (stmt->elseStmt) {
@@ -475,26 +484,26 @@ void CodeGen::genFor(ForStmt *stmt) {
   if (stmt->initStmt)
     genForAssign(stmt->initStmt.get());
 
-  emit(Instruction::MakeGoto(L_cond));
+  emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_cond)));
 
   pushLoop(L_end.asInt(), L_step.asInt());
 
   placeLabel(L_body);
   if (stmt->bodyStmt)
     genStmt(stmt->bodyStmt.get());
-  emit(Instruction::MakeGoto(L_step));
+  emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_step)));
 
   placeLabel(L_step);
   if (stmt->updateStmt)
     genForAssign(stmt->updateStmt.get());
-  emit(Instruction::MakeGoto(L_cond));
+  emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_cond)));
 
   placeLabel(L_cond);
   if (stmt->cond) {
     genCond(stmt->cond.get(), L_body.asInt(), L_end.asInt());
   } else {
     // default is true
-    emit(Instruction::MakeGoto(L_body));
+    emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_body)));
   }
 
   placeLabel(L_end);
@@ -505,14 +514,16 @@ void CodeGen::genBreak(BreakStmt *stmt) {
   if (!stmt)
     return;
   auto *loop = currentLoop();
-  emit(Instruction::MakeGoto(Operand::Label(loop->breakLabel)));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeGoto(Operand::Label(loop->breakLabel))));
 }
 
 void CodeGen::genContinue(ContinueStmt *stmt) {
   if (!stmt)
     return;
   auto *loop = currentLoop();
-  emit(Instruction::MakeGoto(Operand::Label(loop->continueLabel)));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeGoto(Operand::Label(loop->continueLabel))));
 }
 
 void CodeGen::genReturn(ReturnStmt *stmt) {
@@ -524,7 +535,7 @@ void CodeGen::genReturn(ReturnStmt *stmt) {
     result = genExp(stmt->exp.get());
   }
 
-  emit(Instruction::MakeReturn(result));
+  emit(std::make_unique<Instruction>(Instruction::MakeReturn(result)));
 }
 
 void CodeGen::genPrintf(PrintfStmt *stmt) {
@@ -537,16 +548,17 @@ void CodeGen::genPrintf(PrintfStmt *stmt) {
   for (auto &e : stmt->args) {
     vals.push_back(genExp(e.get()));
   }
-  emit(Instruction::MakeArg(Operand::Variable(fmtSym)));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeArg(Operand::Variable(fmtSym))));
   int argc = 1;
   for (auto &v : vals) {
-    emit(Instruction::MakeArg(v));
+    emit(std::make_unique<Instruction>(Instruction::MakeArg(v)));
     argc++;
   }
   auto printfSym = symbolTable_->findSymbol("printf");
   Operand fnSym = Operand::Variable(printfSym);
   Operand ret = newTemp();
-  emit(Instruction::MakeCall(fnSym, argc, ret));
+  emit(std::make_unique<Instruction>(Instruction::MakeCall(fnSym, argc, ret)));
 }
 
 void CodeGen::genForAssign(ForAssignStmt *stmt) {
@@ -557,10 +569,11 @@ void CodeGen::genForAssign(ForAssignStmt *stmt) {
     Operand idx;
     Operand lhs = genLVal(as.lval.get(), &idx);
     if (idx.getType() == OperandType::Empty) {
-      emit(Instruction::MakeAssign(rhs, lhs));
+      emit(std::make_unique<Instruction>(Instruction::MakeAssign(rhs, lhs)));
     } else {
       // arrary
-      emit(Instruction::MakeStore(rhs, lhs, idx));
+      emit(
+          std::make_unique<Instruction>(Instruction::MakeStore(rhs, lhs, idx)));
     }
   }
 }
@@ -606,7 +619,8 @@ void CodeGen::genConstDef(ConstDef *def) {
   if (def->arraySize) {
     sizeOp = genConstExp(def->arraySize.get());
   }
-  emit(Instruction::MakeAlloca(Operand::Variable(sym), sizeOp));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeAlloca(Operand::Variable(sym), sizeOp)));
   if (def->constinitVal) {
     genConstInitVal(def->constinitVal.get(), sym);
   }
@@ -636,24 +650,24 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
     if (!definedGlobals_.count(gname)) {
       definedGlobals_.insert(gname);
       // static variable store in .data
-      emitGlobal(Instruction::MakeAlloca(Operand::Variable(sym),
-                                         Operand::ConstantInt(sizeInt)));
+      emitGlobal(std::make_unique<Instruction>(Instruction::MakeAlloca(
+          Operand::Variable(sym), Operand::ConstantInt(sizeInt))));
       if (def->initVal) {
         if (!def->initVal->isArray) {
           if (def->initVal->exp) {
             int val = 0;
             if (tryEvalExp(def->initVal->exp.get(), val)) {
-              emitGlobal(Instruction::MakeAssign(Operand::ConstantInt(val),
-                                                 Operand::Variable(sym)));
+              emitGlobal(std::make_unique<Instruction>(Instruction::MakeAssign(
+                  Operand::ConstantInt(val), Operand::Variable(sym))));
             }
           }
         } else {
           for (size_t i = 0; i < def->initVal->arrayExps.size(); ++i) {
             int val = 0;
             if (tryEvalExp(def->initVal->arrayExps[i].get(), val)) {
-              emitGlobal(Instruction::MakeStore(Operand::ConstantInt(val),
-                                                Operand::Variable(sym),
-                                                Operand::ConstantInt(i)));
+              emitGlobal(std::make_unique<Instruction>(Instruction::MakeStore(
+                  Operand::ConstantInt(val), Operand::Variable(sym),
+                  Operand::ConstantInt(i))));
             }
           }
         }
@@ -662,8 +676,8 @@ void CodeGen::genVarDef(VarDef *def, bool isStaticCtx) {
     return;
   }
 
-  emit(Instruction::MakeAlloca(Operand::Variable(sym),
-                               Operand::ConstantInt(sizeInt)));
+  emit(std::make_unique<Instruction>(Instruction::MakeAlloca(
+      Operand::Variable(sym), Operand::ConstantInt(sizeInt))));
   if (def->initVal) {
     genInitVal(def->initVal.get(), sym);
   }
@@ -679,14 +693,15 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
     if (v.getType() == OperandType::ConstantInt) {
       constValues_[sym] = v.asInt();
     }
-    emit(Instruction::MakeAssign(v, var));
+    emit(std::make_unique<Instruction>(Instruction::MakeAssign(v, var)));
     return;
   }
   // array
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &ce = init->arrayExps[i];
     Operand v = genConstExp(ce.get());
-    emit(Instruction::MakeStore(v, var, Operand::ConstantInt(i)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeStore(v, var, Operand::ConstantInt(i))));
   }
 }
 
@@ -698,14 +713,15 @@ void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
     if (init->exp) {
       int constValue = 0;
       Operand v = genExp(init->exp.get());
-      emit(Instruction::MakeAssign(v, var));
+      emit(std::make_unique<Instruction>(Instruction::MakeAssign(v, var)));
     }
     return;
   }
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &e = init->arrayExps[i];
     Operand v = genExp(e.get());
-    emit(Instruction::MakeStore(v, var, Operand::ConstantInt(i)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeStore(v, var, Operand::ConstantInt(i))));
   }
 }
 Operand CodeGen::genExp(Exp *exp) {
@@ -751,7 +767,8 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
       if (!index) { // is rvalue, as caller param
         Operand addr = newTemp();
         // pass address
-        emit(Instruction::MakeAssign(base, addr));
+        emit(
+            std::make_unique<Instruction>(Instruction::MakeAssign(base, addr)));
         return addr;
       }
       // otherwise is lvalue, return base
@@ -768,7 +785,7 @@ Operand CodeGen::genLVal(LVal *lval, Operand *index) {
     return base;
   }
   Operand dst = newTemp(); // pass by value
-  emit(Instruction::MakeLoad(base, idx, dst));
+  emit(std::make_unique<Instruction>(Instruction::MakeLoad(base, idx, dst)));
   return dst;
 }
 
@@ -809,11 +826,12 @@ Operand CodeGen::genUnary(UnaryExp *ue) {
     }
 
     for (size_t i = 0; i < args.size(); i++) {
-      emit(Instruction::MakeArg(args[i]));
+      emit(std::make_unique<Instruction>(Instruction::MakeArg(args[i])));
     }
 
     Operand result = newTemp();
-    emit(Instruction::MakeCall(func, args.size(), result));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeCall(func, args.size(), result)));
 
     return result;
   }
@@ -832,12 +850,14 @@ Operand CodeGen::genUnary(UnaryExp *ue) {
       return operand;
     case UnaryOp::OpType::MINUS: {
       Operand result = newTemp();
-      emit(Instruction::MakeUnary(OpCode::NEG, operand, result));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeUnary(OpCode::NEG, operand, result)));
       return result;
     }
     case UnaryOp::OpType::NOT: {
       Operand result = newTemp();
-      emit(Instruction::MakeUnary(OpCode::NOT, operand, result));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeUnary(OpCode::NOT, operand, result)));
       return result;
     }
     }
@@ -874,7 +894,8 @@ Operand CodeGen::genMul(MulExp *me) {
     return Operand();
   }
   Operand result = newTemp();
-  emit(Instruction::MakeBinary(op, left, right, result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeBinary(op, left, right, result)));
   return result;
 }
 
@@ -892,7 +913,8 @@ Operand CodeGen::genAdd(AddExp *ae) {
   Operand right = genMul(ae->mulExp.get());
   OpCode op = (ae->op == AddExp::OpType::PLUS) ? OpCode::ADD : OpCode::SUB;
   Operand result = newTemp();
-  emit(Instruction::MakeBinary(op, left, right, result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeBinary(op, left, right, result)));
   return result;
 }
 
@@ -929,7 +951,8 @@ Operand CodeGen::genRel(RelExp *re) {
     return Operand();
   }
   Operand result = newTemp();
-  emit(Instruction::MakeBinary(op, left, right, result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeBinary(op, left, right, result)));
   return result;
 }
 
@@ -949,7 +972,8 @@ Operand CodeGen::genEq(EqExp *ee) {
   Operand right = genRel(ee->relExp.get());
   OpCode op = (ee->op == EqExp::OpType::EQL) ? OpCode::EQ : OpCode::NEQ;
   Operand result = newTemp();
-  emit(Instruction::MakeBinary(op, left, right, result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeBinary(op, left, right, result)));
   return result;
 }
 
@@ -964,7 +988,8 @@ Operand CodeGen::genLAnd(LAndExp *la) {
   }
 
   Operand result = newTemp();
-  emit(Instruction::MakeAssign(Operand::ConstantInt(0), result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeAssign(Operand::ConstantInt(0), result)));
 
   Operand L_true = newLabel();
   Operand L_end = newLabel();
@@ -972,7 +997,8 @@ Operand CodeGen::genLAnd(LAndExp *la) {
   branchLAndForVal(la, L_true.asInt(), L_end.asInt());
 
   placeLabel(L_true);
-  emit(Instruction::MakeAssign(Operand::ConstantInt(1), result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeAssign(Operand::ConstantInt(1), result)));
   placeLabel(L_end);
   return result;
 }
@@ -988,7 +1014,8 @@ Operand CodeGen::genLOr(LOrExp *lo) {
   }
 
   Operand result = newTemp();
-  emit(Instruction::MakeAssign(Operand::ConstantInt(0), result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeAssign(Operand::ConstantInt(0), result)));
 
   Operand L_true = newLabel();
   Operand L_end = newLabel();
@@ -996,7 +1023,8 @@ Operand CodeGen::genLOr(LOrExp *lo) {
   branchLOrForVal(lo, L_true.asInt(), L_end.asInt());
 
   placeLabel(L_true);
-  emit(Instruction::MakeAssign(Operand::ConstantInt(1), result));
+  emit(std::make_unique<Instruction>(
+      Instruction::MakeAssign(Operand::ConstantInt(1), result)));
   placeLabel(L_end);
   return result;
 }
@@ -1016,7 +1044,8 @@ std::vector<Operand> CodeGen::genFuncRParams(FuncRParams *params) {
 
 void CodeGen::branchLAndForCond(LAndExp *node, int trueLbl, int falseLbl) {
   if (!node) {
-    emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeGoto(Operand::Label(falseLbl))));
     return;
   }
   if (node->left) {
@@ -1025,25 +1054,32 @@ void CodeGen::branchLAndForCond(LAndExp *node, int trueLbl, int falseLbl) {
     placeLabel(mid);
     if (node->eqExp) {
       Operand v = genEq(node->eqExp.get());
-      emit(Instruction::MakeIf(v, Operand::Label(trueLbl)));
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeIf(v, Operand::Label(trueLbl))));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     } else {
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     }
   } else {
     if (node->eqExp) {
       Operand v = genEq(node->eqExp.get());
-      emit(Instruction::MakeIf(v, Operand::Label(trueLbl)));
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeIf(v, Operand::Label(trueLbl))));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     } else {
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     }
   }
 }
 
 void CodeGen::branchLOrForCond(LOrExp *node, int trueLbl, int falseLbl) {
   if (!node) {
-    emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeGoto(Operand::Label(falseLbl))));
     return;
   }
   if (node->left) {
@@ -1058,7 +1094,8 @@ void CodeGen::branchLOrForCond(LOrExp *node, int trueLbl, int falseLbl) {
 
 void CodeGen::branchLAndForVal(LAndExp *node, int trueLbl, int falseLbl) {
   if (!node) {
-    emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeGoto(Operand::Label(falseLbl))));
     return;
   }
   if (node->left) {
@@ -1067,25 +1104,32 @@ void CodeGen::branchLAndForVal(LAndExp *node, int trueLbl, int falseLbl) {
     placeLabel(mid);
     if (node->eqExp) {
       Operand v = genEq(node->eqExp.get());
-      emit(Instruction::MakeIf(v, Operand::Label(trueLbl)));
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeIf(v, Operand::Label(trueLbl))));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     } else {
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     }
   } else {
     if (node->eqExp) {
       Operand v = genEq(node->eqExp.get());
-      emit(Instruction::MakeIf(v, Operand::Label(trueLbl)));
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeIf(v, Operand::Label(trueLbl))));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     } else {
-      emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+      emit(std::make_unique<Instruction>(
+          Instruction::MakeGoto(Operand::Label(falseLbl))));
     }
   }
 }
 
 void CodeGen::branchLOrForVal(LOrExp *node, int trueLbl, int falseLbl) {
   if (!node) {
-    emit(Instruction::MakeGoto(Operand::Label(falseLbl)));
+    emit(std::make_unique<Instruction>(
+        Instruction::MakeGoto(Operand::Label(falseLbl))));
     return;
   }
   if (node->left) {
