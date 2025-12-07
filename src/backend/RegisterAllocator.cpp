@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <vector>
 
+// TODO:
+// put variable into color graphing
 RegisterAllocator::RegisterAllocator() {}
 RegisterAllocator::~RegisterAllocator() {}
 

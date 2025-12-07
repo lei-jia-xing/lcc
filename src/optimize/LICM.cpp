@@ -4,11 +4,9 @@
 #include <set>
 #include <vector>
 
-// Forward declarations
 class DominatorTree;
 class LoopAnalysis;
 
-// Helper to get predecessors of a basic block.
 static std::vector<BasicBlock *> getPredecessors(BasicBlock *BB, Function &F) {
   std::vector<BasicBlock *> predecessors;
   for (const auto &b_ptr : F.getBlocks()) {
@@ -19,7 +17,6 @@ static std::vector<BasicBlock *> getPredecessors(BasicBlock *BB, Function &F) {
   return predecessors;
 }
 
-// Main entry point for the LICM pass.
 void LICMPass::run(Function &F, DominatorTree &DT,
                    std::vector<LoopInfo> &loops) {
   if (loops.empty()) {

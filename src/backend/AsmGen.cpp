@@ -185,61 +185,43 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
       continue;
     emitFunction(func, out);
   }
-  // Copy in https://gist.github.com/KaceCottam/37a065a2c194c0eb50b417cf67455af1
-  // align to 8 bytes
   out << "printf:\n";
-  out << "  addi $sp, $sp, -28\n";
-  out << "  sw $t0, ($sp)\n";
-  out << "  sw $t1, 4($sp)\n";
-  out << "  sw $t2, 8($sp)\n";
-  out << "  sw $a0, 12($sp)\n";
-  out << "  sw $a1, 16($sp)\n";
-  out << "  sw $a2, 20($sp)\n";
-  out << "  sw $a3, 24($sp)\n";
-  out << "\n";
-  out << "  la $t0, ($a0)      # t0: current position in format string\n";
-  out << "  addiu $t1, $sp, 16 # t1: pointer to current argument\n";
-  out << "  li $t2, 0          # t2: temporary for comparison\n";
+  out << "  addiu $sp, $sp, -16\n";
+  out << "  sw $a1, 0($sp)\n";
+  out << "  sw $a2, 4($sp)\n";
+  out << "  sw $a3, 8($sp)\n";
+  out << "  move $t0, $a0      # t0: format string cursor\n";
+  out << "  move $t1, $sp      # t1: current argument pointer (starts at "
+         "$a1)\n";
   out << "\n";
   out << "printf_loop:\n";
   out << "  lbu $a0, 0($t0)\n";
   out << "  beq $a0, $zero, printf_end\n";
-  out << "  addiu $t0, $t0, 1\n";
-  out << "  ori $t2, $zero, '%'\n";
-  out << "  subu $t2, $a0, $t2\n";
-  out << "  beq $t2, $zero, printf_format\n";
-  out << "  j printf_char\n";
-  out << "\n";
-  out << "printf_format:\n";
-  out << "  lbu $a0, 0($t0)\n";
-  out << "  addiu $t0, $t0, 1\n";
-  out << "  ori $t2, $zero, 'd'\n";
-  out << "  subu $t2, $a0, $t2\n";
-  out << "  beq $t2, $zero, printf_int\n";
-  out << "  j printf_char\n";
-  out << "\n";
-  out << "printf_int:\n";
-  out << "  li $v0, 1\n";
-  out << "  lw $a0, 0($t1)\n";
-  out << "  addiu $t1, $t1, 4\n";
-  out << "  syscall\n";
-  out << "  j printf_loop\n";
-  out << "\n";
-  out << "printf_char:\n";
+  out << "  addiu $t0, $t0, 1\n"; // move cursor
+  out << "  li $t2, 37         # 37 is '%'\n";
+  out << "  beq $a0, $t2, printf_format\n";
   out << "  li $v0, 11\n";
   out << "  syscall\n";
   out << "  j printf_loop\n";
   out << "\n";
+  out << "printf_format:\n";
+  out << "  lbu $a0, 0($t0)\n";
+  out << "  addiu $t0, $t0, 1\n";
+  out << "  li $t2, 100        # 100 is 'd'\n";
+  out << "  beq $a0, $t2, printf_int\n";
+  out << "  li $v0, 11\n";
+  out << "  syscall\n";
+  out << "  j printf_loop\n";
+  out << "\n";
+  out << "printf_int:\n";
+  out << "  lw $a0, 0($t1)     # Load arg from stack using t1\n";
+  out << "  addiu $t1, $t1, 4  # Move arg pointer to next\n";
+  out << "  li $v0, 1\n";
+  out << "  syscall\n";
+  out << "  j printf_loop\n";
+  out << "\n";
   out << "printf_end:\n";
-  out << "  # Restore registers\n";
-  out << "  lw $t0, ($sp)\n";
-  out << "  lw $t1, 4($sp)\n";
-  out << "  lw $t2, 8($sp)\n";
-  out << "  lw $a0, 12($sp)\n";
-  out << "  lw $a1, 16($sp)\n";
-  out << "  lw $a2, 20($sp)\n";
-  out << "  lw $a3, 24($sp)\n";
-  out << "  addiu $sp, $sp, 28\n";
+  out << "  addiu $sp, $sp, 16\n";
   out << "  jr $ra\n\n";
   out << "getint:\n";
   out << "  li $v0, 5\n";
@@ -449,6 +431,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::IF: {
     std::string rcond = getRegister(a1, out);
     out << "  bne " << rcond << ", $zero, " << labelName(res) << "\n";
+    releaseScratch(rcond);
     break;
   }
   case OpCode::ASSIGN: {
@@ -460,11 +443,13 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       } else {
         std::string src = getRegister(a1, out);
         out << "  move " << dst << ", " << src << "\n";
+        releaseScratch(src);
       }
       storeToSpill(res.asInt(), dst);
     } else if (isVar(res)) {
       std::string src = getRegister(a1, out);
       storeResult(res, src, out);
+      releaseScratch(src);
     }
     break;
   }
@@ -472,6 +457,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     // MUL arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     // 2^n * x | x * 2^n with shift optimization
     std::string rd = getResultReg(res);
+    bool optimized = false;
 
     if (isConst(a2)) {
       int val = a2.asInt();
@@ -479,33 +465,33 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       if (shift >= 0) {
         std::string ra = getRegister(a1, out);
         out << "  sll " << rd << ", " << ra << ", " << shift << "\n";
-        if (isTemp(res)) {
-          storeToSpill(res.asInt(), rd);
-        }
-        break;
+        releaseScratch(ra);
+        optimized = true;
       }
     }
-    if (isConst(a1)) {
+    if (!optimized && isConst(a1)) {
       int val = a1.asInt();
       int shift = log2IfPowerOf2(val);
       if (shift >= 0) {
         std::string rb = getRegister(a2, out);
         out << "  sll " << rd << ", " << rb << ", " << shift << "\n";
-        if (isTemp(res)) {
-          storeToSpill(res.asInt(), rd);
-        }
-        break;
+        releaseScratch(rb);
+        optimized = true;
       }
     }
-
-    // Fall back to regular multiplication
-    std::string ra = getRegister(a1, out);
-    std::string rb = getRegister(a2, out);
-    out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
+    if (!optimized) {
+      // Fall back to regular multiplication
+      std::string ra = getRegister(a1, out);
+      std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
+      out << "  mul " << rd << ", " << ra << ", " << rb << "\n";
+      releaseScratch(ra);
+      if (a1 != a2) {
+        releaseScratch(rb);
+      }
+    }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
-
     break;
   }
   case OpCode::DIV: {
@@ -516,9 +502,13 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     // it remians to be optimized in future if needed
     std::string rd = getResultReg(res);
     std::string ra = getRegister(a1, out);
-    std::string rb = getRegister(a2, out);
+    std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
     out << "  div " << ra << ", " << rb << "\n";
     out << "  mflo " << rd << "\n";
+    releaseScratch(ra);
+    if (a1 != a2) {
+      releaseScratch(rb);
+    }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -529,7 +519,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::MOD: {
     // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
-    std::string rb = getRegister(a2, out);
+    std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
     std::string rd = getResultReg(res);
 
     switch (op) {
@@ -546,7 +536,10 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     default:
       break;
     }
-
+    releaseScratch(ra);
+    if (a1 != a2) {
+      releaseScratch(rb);
+    }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -557,7 +550,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string ra = getRegister(a1, out);
     std::string rd = getResultReg(res);
     out << "  subu " << rd << ", $zero, " << ra << "\n";
-
+    releaseScratch(ra);
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -572,7 +565,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::GE: {
     // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
-    std::string rb = getRegister(a2, out);
+    std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
     std::string rd = getResultReg(res);
     switch (op) {
     case OpCode::LT:
@@ -585,30 +578,37 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       std::string temp = allocateScratch();
       out << "  slt " << temp << ", " << rb << ", " << ra << "\n";
       out << "  xori " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
     }
     case OpCode::GE: {
       std::string temp = allocateScratch();
       out << "  slt " << temp << ", " << ra << ", " << rb << "\n";
       out << "  xori " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
     }
     case OpCode::EQ: {
       std::string temp = allocateScratch();
       out << "  subu " << temp << ", " << ra << ", " << rb << "\n";
       out << "  sltiu " << rd << ", " << temp << ", 1\n";
+      releaseScratch(temp);
       break;
     }
     case OpCode::NEQ: {
       std::string temp = allocateScratch();
       out << "  subu " << temp << ", " << ra << ", " << rb << "\n";
       out << "  sltu " << rd << ", $zero, " << temp << "\n";
+      releaseScratch(temp);
       break;
     }
     default:
       break;
     }
-
+    releaseScratch(ra);
+    if (a1 != a2) {
+      releaseScratch(rb);
+    }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -620,8 +620,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string ra = getRegister(a1, out);
     std::string rd = getResultReg(res);
     out << "  sltiu " << rd << ", " << ra << ", 1\n";
+    releaseScratch(ra);
 
-    // Store result if needed
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -632,8 +632,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   case OpCode::OR: {
     // OR|AND arg1(var|temp|const), arg2(var|temp|const), dst(temp)
     std::string ra = getRegister(a1, out);
-    std::string rb = getRegister(a2, out);
-
+    std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
     std::string rd = getResultReg(res);
 
     out << "  sltu " << rd << ", $zero, " << ra << "\n";
@@ -644,7 +643,11 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     else
       out << "  or " << rd << ", " << rd << ", " << rt << "\n";
 
-    // Store result if needed
+    releaseScratch(rt);
+    releaseScratch(ra);
+    if (a1 != a2) {
+      releaseScratch(rb);
+    }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
@@ -688,6 +691,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
 
     std::string dstReg = getResultReg(res);
+    std::string indexReg = "";
 
     if (isEmpty(a2)) {
       bool isArrary = baseSym && baseSym->type &&
@@ -708,15 +712,19 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         out << "  lw " << dstReg << ", 0(" << offReg << ")\n";
       }
     } else {
-      std::string indexReg = getRegister(a2, out);
+      indexReg = getRegister(a2, out);
       std::string offsetReg = allocateScratch();
       out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
 
       out << "  addu " << offsetReg << ", " << baseReg << ", " << offsetReg
           << "\n";
       out << "  lw " << dstReg << ", 0(" << offsetReg << ")\n";
+      releaseScratch(offsetReg);
     }
     storeResult(res, dstReg, out);
+    if (!indexReg.empty()) {
+      releaseScratch(indexReg);
+    }
     break;
   }
   case OpCode::STORE: {
@@ -756,6 +764,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       baseReg = getRegister(a2, out);
     }
 
+    std::string indexReg = "";
     auto &idxOp = res;
 
     if (isEmpty(idxOp)) {
@@ -769,6 +778,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         out << "  li " << offReg << ", " << offset << "\n";
         out << "  addu " << offReg << ", " << baseReg << ", " << offReg << "\n";
         out << "  sw " << rv << ", 0(" << offReg << ")\n";
+        releaseScratch(offReg);
       }
     } else {
       std::string indexReg = getRegister(idxOp, out);
@@ -777,6 +787,12 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       out << "  addu " << offsetReg << ", " << baseReg << ", " << offsetReg
           << "\n";
       out << "  sw " << rv << ", 0(" << offsetReg << ")\n";
+      releaseScratch(offsetReg);
+    }
+    releaseScratch(rv);
+    releaseScratch(baseReg);
+    if (!indexReg.empty()) {
+      releaseScratch(indexReg);
     }
     break;
   }
@@ -794,12 +810,14 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         } else {
           std::string r = getRegister(a1, out);
           out << "  move " << aregs[idx] << ", " << r << "\n";
+          releaseScratch(r);
         }
       } else if (isConst(a1)) {
         out << "  li " << aregs[idx] << ", " << a1.asInt() << "\n";
       } else {
         std::string r = getRegister(a1, out);
         out << "  move " << aregs[idx] << ", " << r << "\n";
+        releaseScratch(r);
       }
     } else {
       pendingExtraArgs_.push_back(a1);
@@ -855,6 +873,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       } else {
         std::string r = getRegister(res, out);
         out << "  move $v0, " << r << "\n";
+        releaseScratch(r);
       }
     }
     if (!currentEpilogueLabel_.empty()) {

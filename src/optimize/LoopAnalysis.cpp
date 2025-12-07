@@ -86,7 +86,7 @@ void LoopAnalysis::findLoopBlocks(BasicBlock *header, BasicBlock *backEdgeSrc,
                                   std::set<BasicBlock *> &loopBlocks) {
   std::stack<BasicBlock *> worklist;
 
-  loopBlocks.clear();        // Ensure it's clean for this loop
+  loopBlocks.clear();
   loopBlocks.insert(header); // Header is always part of the loop
 
   // Start with the source of the back edge, if it's not the header itself
@@ -98,7 +98,7 @@ void LoopAnalysis::findLoopBlocks(BasicBlock *header, BasicBlock *backEdgeSrc,
     BasicBlock *current = worklist.top();
     worklist.pop();
 
-    if (loopBlocks.find(current) == loopBlocks.end()) { // If not already added
+    if (loopBlocks.find(current) == loopBlocks.end()) {
       loopBlocks.insert(current);
       // Add all predecessors of 'current' to the worklist
       std::vector<BasicBlock *> predecessors = getPredecessors(current, F);

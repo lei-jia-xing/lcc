@@ -32,6 +32,7 @@ public:
     }
     return asInt() == other.asInt();
   }
+  bool operator!=(const Operand &other) const { return !(*this == other); }
 
 private:
   Operand(OperandType t, std::variant<std::shared_ptr<Symbol>, int> val);
