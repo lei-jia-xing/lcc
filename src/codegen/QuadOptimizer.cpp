@@ -4,6 +4,7 @@
 #include "optimize/DominatorTree.hpp"
 #include "optimize/LICM.hpp"
 #include "optimize/LoopAnalysis.hpp"
+#include <functional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -350,23 +351,179 @@ isOperandInvariant(const Operand &op,
   return false;
 }
 
+// CSE Pass implementation
+size_t CSEPass::ExpressionHash::operator()(
+    const std::pair<OpCode, std::pair<Operand, Operand>> &expr) const {
+  size_t h1 = std::hash<int>{}(static_cast<int>(expr.first));
+
+  auto hashOperand = [](const Operand &op) {
+    switch (op.getType()) {
+    case OperandType::ConstantInt:
+      return std::hash<int>{}(op.asInt());
+    case OperandType::Temporary:
+      return std::hash<int>{}(op.asInt() +
+                              1000000); // Offset to distinguish from constants
+    case OperandType::Variable:
+      return std::hash<void *>{}(op.asSymbol().get());
+    default:
+      return std::hash<int>{}(0);
+    }
+  };
+
+  size_t h2 = hashOperand(expr.second.first);
+  size_t h3 = hashOperand(expr.second.second);
+
+  return h1 ^ (h2 << 1) ^ (h3 << 2);
+}
+
+bool CSEPass::ExpressionEqual::operator()(
+    const std::pair<OpCode, std::pair<Operand, Operand>> &lhs,
+    const std::pair<OpCode, std::pair<Operand, Operand>> &rhs) const {
+  if (lhs.first != rhs.first) {
+    return false;
+  }
+
+  auto operandsEqual = [](const Operand &op1, const Operand &op2) {
+    if (op1.getType() != op2.getType()) {
+      return false;
+    }
+    switch (op1.getType()) {
+    case OperandType::ConstantInt:
+    case OperandType::Temporary:
+      return op1.asInt() == op2.asInt();
+    case OperandType::Variable:
+      return op1.asSymbol() == op2.asSymbol();
+    default:
+      return true;
+    }
+  };
+
+  return operandsEqual(lhs.second.first, rhs.second.first) &&
+         operandsEqual(lhs.second.second, rhs.second.second);
+}
+
+bool CSEPass::run(Function &fn) {
+  bool changed = false;
+
+  // Expression to available temporary mapping
+  // We use unordered_map with custom hash and equal functions for efficiency
+  using Expression = std::pair<OpCode, std::pair<Operand, Operand>>;
+  using ExpressionMap =
+      std::unordered_map<Expression, int, ExpressionHash, ExpressionEqual>;
+
+  for (auto &blk : fn.getBlocks()) {
+    ExpressionMap availableExpressions;
+    auto &instructions = blk->getInstructions();
+
+    // First pass: collect available expressions and identify redundant ones
+    std::vector<std::pair<size_t, int>>
+        replacements; // (instruction_index, temp_to_use)
+
+    for (size_t i = 0; i < instructions.size(); i++) {
+      auto &inst = instructions[i];
+      if (!inst)
+        continue;
+
+      OpCode op = inst->getOp();
+
+      // Check if this is a computable expression
+      if (op == OpCode::ADD || op == OpCode::SUB || op == OpCode::MUL ||
+          op == OpCode::DIV || op == OpCode::MOD || op == OpCode::AND ||
+          op == OpCode::OR || op == OpCode::LT || op == OpCode::LE ||
+          op == OpCode::GT || op == OpCode::GE || op == OpCode::EQ ||
+          op == OpCode::NEQ) {
+
+        Expression expr = {op, {inst->getArg1(), inst->getArg2()}};
+
+        auto it = availableExpressions.find(expr);
+        if (it != availableExpressions.end()) {
+          // Found a common subexpression - record replacement
+          replacements.push_back({i, it->second});
+          changed = true;
+        } else {
+          // New expression - make it available for future use
+          const Operand &result = inst->getResult();
+          if (result.getType() == OperandType::Temporary) {
+            availableExpressions[expr] = result.asInt();
+          }
+        }
+      }
+
+      // Invalidate expressions that use the result of this instruction
+      const Operand &result = inst->getResult();
+      if (result.getType() == OperandType::Temporary ||
+          result.getType() == OperandType::Variable) {
+        // Remove expressions that use this operand
+        for (auto it = availableExpressions.begin();
+             it != availableExpressions.end();) {
+          bool usesResult = false;
+
+          auto operandUses = [&](const Operand &op) {
+            if (op.getType() == OperandType::Temporary &&
+                result.getType() == OperandType::Temporary) {
+              return op.asInt() == result.asInt();
+            }
+            if (op.getType() == OperandType::Variable &&
+                result.getType() == OperandType::Variable) {
+              return op.asSymbol() == result.asSymbol();
+            }
+            return false;
+          };
+
+          Expression expr = it->first;
+          if (operandUses(expr.second.first) ||
+              operandUses(expr.second.second)) {
+            usesResult = true;
+          }
+
+          if (usesResult) {
+            it = availableExpressions.erase(it);
+          } else {
+            ++it;
+          }
+        }
+      }
+    }
+
+    // Second pass: apply replacements (in reverse order to maintain indices)
+    for (auto it = replacements.rbegin(); it != replacements.rend(); ++it) {
+      size_t idx = it->first;
+      int replacementTemp = it->second;
+
+      if (idx < instructions.size()) {
+        auto &inst = instructions[idx];
+        if (inst) {
+          // Replace the computation with a simple assignment
+          Operand result = inst->getResult();
+          inst = std::make_unique<Instruction>(
+              OpCode::ASSIGN, Operand::Temporary(replacementTemp), Operand(),
+              result);
+        }
+      }
+    }
+  }
+
+  return changed;
+}
+
 void runDefaultQuadOptimizations(Function &fn) {
   // Run LICM first
-  // DominatorTree dt;
-  // dt.run(fn);
-  // LoopAnalysis la;
-  // la.run(fn, dt);
-  // if (!la.getLoops().empty()) {
-  //   LICMPass licm;
-  //   std::vector<LoopInfo> loops = la.getLoops();
-  //   licm.run(fn, dt, loops);
-  // }
+  DominatorTree dt;
+  dt.run(fn);
+  LoopAnalysis la;
+  la.run(fn, dt);
+  if (!la.getLoops().empty()) {
+    LICMPass licm;
+    std::vector<LoopInfo> loops = la.getLoops();
+    licm.run(fn, dt, loops);
+  }
 
   // Run local optimizations
   PassManager pm;
   pm.add(std::make_unique<ConstPropPass>());
   pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<AlgebraicSimplifyPass>());
+  pm.add(std::make_unique<CSEPass>()); // Add CSE pass
   pm.add(std::make_unique<LocalDCEPass>());
   pm.run(fn);
 }

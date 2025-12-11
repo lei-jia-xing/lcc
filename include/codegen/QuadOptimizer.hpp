@@ -87,4 +87,28 @@ public:
   bool run(Function &fn) override;
 };
 
+/**
+ * @class CSEPass
+ * @brief Common Subexpression Elimination in function scope
+ * Eliminates redundant computations of the same expression.
+ * Example:
+ *    t0 = a + b
+ *    t1 = a + b  // Same expression, can be replaced with t1 = t0
+ */
+class CSEPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+
+private:
+  struct ExpressionHash {
+    size_t operator()(
+        const std::pair<OpCode, std::pair<Operand, Operand>> &expr) const;
+  };
+
+  struct ExpressionEqual {
+    bool
+    operator()(const std::pair<OpCode, std::pair<Operand, Operand>> &lhs,
+               const std::pair<OpCode, std::pair<Operand, Operand>> &rhs) const;
+  };
+};
 void runDefaultQuadOptimizations(Function &fn);
