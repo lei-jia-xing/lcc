@@ -1,11 +1,10 @@
 #include "optimize/LICM.hpp"
 #include "codegen/Instruction.hpp"
+#include "optimize/DominatorTree.hpp"
+#include "optimize/LoopAnalysis.hpp"
 #include <map>
 #include <set>
 #include <vector>
-
-class DominatorTree;
-class LoopAnalysis;
 
 static std::vector<BasicBlock *> getPredecessors(BasicBlock *BB, Function &F) {
   std::vector<BasicBlock *> predecessors;
@@ -24,15 +23,12 @@ void LICMPass::run(Function &F, DominatorTree &DT,
   }
 
   std::map<int, Instruction *> tempDefinitions;
-  std::map<std::shared_ptr<Symbol>, Instruction *> varDefinitions;
 
   for (auto &bb_ptr : F.getBlocks()) {
     for (auto &inst_ptr : bb_ptr->getInstructions()) {
       const Operand &resultOp = inst_ptr->getResult();
       if (resultOp.getType() == OperandType::Temporary) {
         tempDefinitions[resultOp.asInt()] = inst_ptr.get();
-      } else if (resultOp.getType() == OperandType::Variable) {
-        varDefinitions[resultOp.asSymbol()] = inst_ptr.get();
       }
     }
   }
@@ -57,6 +53,15 @@ void LICMPass::run(Function &F, DominatorTree &DT,
       continue;
     }
 
+    std::set<std::string> varModifiedInLoop;
+    for (BasicBlock *bb : loop.blocks) {
+      for (auto &inst : bb->getInstructions()) {
+        const Operand &resultOp = inst->getResult();
+        if (resultOp.getType() == OperandType::Variable) {
+          varModifiedInLoop.insert(resultOp.asSymbol()->name);
+        }
+      }
+    }
     std::set<const Instruction *> invariantInstructions;
     bool changed = true;
     while (changed) {
@@ -76,18 +81,14 @@ void LICMPass::run(Function &F, DominatorTree &DT,
               auto it = tempDefinitions.find(op.asInt());
               if (it != tempDefinitions.end()) {
                 Instruction *def_inst = it->second;
-                return loop.blocks.find(F.findBlockOf(def_inst)) ==
-                           loop.blocks.end() ||
+                BasicBlock *def_block = F.findBlockOf(def_inst);
+                return !def_block ||
+                       loop.blocks.find(def_block) == loop.blocks.end() ||
                        invariantInstructions.count(def_inst);
               }
             } else if (op.getType() == OperandType::Variable) {
-              auto it = varDefinitions.find(op.asSymbol());
-              if (it != varDefinitions.end()) {
-                Instruction *def_inst = it->second;
-                return loop.blocks.find(F.findBlockOf(def_inst)) ==
-                           loop.blocks.end() ||
-                       invariantInstructions.count(def_inst);
-              }
+              return varModifiedInLoop.find(op.asSymbol()->name) ==
+                     varModifiedInLoop.end();
             }
             return true;
           };

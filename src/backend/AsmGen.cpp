@@ -881,7 +881,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     }
     break;
   }
-  case OpCode::ALLOCA: {
+  case OpCode::ALLOCA:
+  case OpCode::PHI: {
     break;
   }
   }

@@ -99,6 +99,10 @@ void LoopAnalysis::findLoopBlocks(BasicBlock *header, BasicBlock *backEdgeSrc,
     worklist.pop();
 
     if (loopBlocks.find(current) == loopBlocks.end()) {
+      if (!DT.dominates(header, current)) {
+        // If 'header' does not dominate 'current', skip it
+        continue;
+      }
       loopBlocks.insert(current);
       // Add all predecessors of 'current' to the worklist
       std::vector<BasicBlock *> predecessors = getPredecessors(current, F);
