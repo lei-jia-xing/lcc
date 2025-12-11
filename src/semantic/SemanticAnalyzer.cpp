@@ -10,11 +10,13 @@ SemanticAnalyzer::SemanticAnalyzer() { initializeBuiltinFunctions(); }
 
 void SemanticAnalyzer::initializeBuiltinFunctions() {
   auto getIntType = Type::create_function_type(Type::getIntType(), {});
-  auto getintSymbol = std::make_shared<Symbol>("getint", getIntType, 0);
+  auto getintSymbol =
+      std::make_shared<Symbol>(nextSymbolId++, "getint", getIntType, 0);
   symbolTable.addSymbol(getintSymbol);
 
   auto printfType = Type::create_function_type(Type::getVoidType(), {});
-  auto printfSymbol = std::make_shared<Symbol>("printf", printfType, 0);
+  auto printfSymbol =
+      std::make_shared<Symbol>(nextSymbolId++, "printf", printfType, 0);
   symbolTable.addSymbol(printfSymbol);
 }
 
@@ -100,7 +102,8 @@ void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
     defType = Type::create_array_type(elem, 0);
   }
   node->type = defType;
-  auto symbol = std::make_shared<Symbol>(node->ident, defType, node->line);
+  auto symbol = std::make_shared<Symbol>(nextSymbolId++, node->ident, defType,
+                                         node->line);
   node->symbol = symbol;
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
@@ -122,7 +125,8 @@ void SemanticAnalyzer::visit(VarDef *node, TypePtr type) {
     defType = Type::create_array_type(elem, 0);
   }
   node->type = defType;
-  auto symbol = std::make_shared<Symbol>(node->ident, defType, node->line);
+  auto symbol = std::make_shared<Symbol>(nextSymbolId++, node->ident, defType,
+                                         node->line);
   node->symbol = symbol;
   if (!symbolTable.addSymbol(symbol)) {
     error(node->line, "b");
@@ -148,7 +152,8 @@ void SemanticAnalyzer::visit(FuncFParam *node) {
     type = Type::create_array_type(type, -1);
   }
 
-  auto paramSymbol = std::make_shared<Symbol>(node->ident, type, node->line);
+  auto paramSymbol =
+      std::make_shared<Symbol>(nextSymbolId++, node->ident, type, node->line);
   node->symbol = paramSymbol;
   if (!symbolTable.addSymbol(paramSymbol)) {
     error(node->identLine, "b");
@@ -172,7 +177,8 @@ void SemanticAnalyzer::visit(FuncDef *node) {
   }
   auto funcType = Type::create_function_type(returnType, params);
 
-  auto funcSymbol = std::make_shared<Symbol>(node->ident, funcType, node->line);
+  auto funcSymbol = std::make_shared<Symbol>(nextSymbolId++, node->ident,
+                                             funcType, node->line);
   if (!symbolTable.addSymbol(funcSymbol)) {
     error(node->identLine, "b");
   }

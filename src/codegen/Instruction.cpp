@@ -150,3 +150,7 @@ Instruction Instruction::MakePhi(const Operand &res) {
 void Instruction::addPhiArg(const Operand &val, BasicBlock *bb) {
   _phiArgs.emplace_back(val, bb);
 }
+const std::vector<std::pair<Operand, BasicBlock *>> &
+Instruction::getPhiArgs() const {
+  return _phiArgs;
+}

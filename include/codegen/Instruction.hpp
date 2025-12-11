@@ -77,9 +77,7 @@ public:
   const Operand &getResult() const { return _result; }
 
   void addPhiArg(const Operand &val, BasicBlock *bb);
-  const std::vector<std::pair<Operand, BasicBlock *>> &getPhiArgs() const {
-    return _phiArgs;
-  }
+  const std::vector<std::pair<Operand, BasicBlock *>> &getPhiArgs() const;
   void setOp(OpCode op) { _op = op; }
   void setArg1(const Operand &v) { _arg1 = v; }
   void setArg2(const Operand &v) { _arg2 = v; }
