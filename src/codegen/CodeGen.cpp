@@ -11,8 +11,6 @@ CodeGen::CodeGen(const SymbolTable &symbolTable) : symbolTable_(&symbolTable) {}
 void CodeGen::reset() {
   ctx_.func = nullptr;
   ctx_.curBlk.reset();
-  ctx_.nextTempId = 0;
-  ctx_.nextLabelId = 0;
   constValues_.clear();
   stringLiterals_.clear();
   nextStringId_ = 0;
@@ -21,9 +19,13 @@ void CodeGen::reset() {
   functions_.clear();
 }
 
-Operand CodeGen::newTemp() { return Operand::Temporary(ctx_.nextTempId++); }
+Operand CodeGen::newTemp() {
+  return Operand::Temporary(ctx_.func->allocateTemp());
+}
 
-Operand CodeGen::newLabel() { return Operand::Label(ctx_.nextLabelId++); }
+Operand CodeGen::newLabel() {
+  return Operand::Label(ctx_.func->allocateLabel());
+}
 
 void CodeGen::placeLabel(const Operand &label) {
   emit(std::make_unique<Instruction>(Instruction::MakeLabel(label)));
@@ -293,12 +295,8 @@ void CodeGen::genFunction(FuncDef *funcDef) {
   // save current context
   auto savedFunc = ctx_.func;
   auto savedBlk = ctx_.curBlk;
-  auto savedTempId = ctx_.nextTempId;
-  auto savedLabelId = ctx_.nextLabelId;
 
   ctx_.func = funcPtr.get();
-  ctx_.nextTempId = 0;
-  ctx_.nextLabelId = 0;
 
   ctx_.curBlk = funcPtr->createBlock();
 
@@ -330,8 +328,6 @@ void CodeGen::genFunction(FuncDef *funcDef) {
   functions_.push_back(funcPtr);
   ctx_.func = savedFunc;
   ctx_.curBlk = savedBlk;
-  ctx_.nextTempId = savedTempId;
-  ctx_.nextLabelId = savedLabelId;
 }
 
 void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
@@ -339,12 +335,8 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
 
   auto savedFunc = ctx_.func;
   auto savedBlk = ctx_.curBlk;
-  auto savedTempId = ctx_.nextTempId;
-  auto savedLabelId = ctx_.nextLabelId;
 
   ctx_.func = funcPtr.get();
-  ctx_.nextTempId = 0;
-  ctx_.nextLabelId = 0;
 
   ctx_.curBlk = funcPtr->createBlock();
 
@@ -364,8 +356,6 @@ void CodeGen::genMainFuncDef(MainFuncDef *mainDef) {
   functions_.push_back(funcPtr);
   ctx_.func = savedFunc;
   ctx_.curBlk = savedBlk;
-  ctx_.nextTempId = savedTempId;
-  ctx_.nextLabelId = savedLabelId;
 }
 void CodeGen::genBlock(Block *block) {
   if (!block)
@@ -709,6 +699,27 @@ void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
   if (!init || !sym)
     return;
   Operand var = Operand::Variable(sym);
+  if (ctx_.func == nullptr) {
+    if (!init->isArray) {
+      if (init->exp) {
+        int val = 0;
+        if (tryEvalExp(init->exp.get(), val)) {
+          emitGlobal(std::make_unique<Instruction>(
+              Instruction::MakeAssign(Operand::ConstantInt(val), var)));
+        }
+      }
+    } else {
+      // global array
+      for (size_t i = 0; i < init->arrayExps.size(); i++) {
+        int val = 0;
+        if (tryEvalExp(init->arrayExps[i].get(), val)) {
+          emitGlobal(std::make_unique<Instruction>(Instruction::MakeStore(
+              Operand::ConstantInt(val), var, Operand::ConstantInt(i))));
+        }
+      }
+    }
+    return;
+  }
   if (!init->isArray) {
     if (init->exp) {
       int constValue = 0;

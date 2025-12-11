@@ -13,7 +13,7 @@ public:
    * @brief Get the symbol table after semantic analysis
    * @return reference to the symbol table
    */
-  const SymbolTable& getSymbolTable() const { return symbolTable; }
+  const SymbolTable &getSymbolTable() const { return symbolTable; }
 
 private:
   /**
@@ -35,6 +35,8 @@ private:
   TypePtr current_function_return_type = nullptr;
 
   bool outputenabled = false;
+
+  int nextSymbolId = 0;
 
   void error(const int &line, const std::string errorType);
 

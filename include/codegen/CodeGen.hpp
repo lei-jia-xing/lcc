@@ -127,14 +127,6 @@ private:
      * @brief current basic block being generated
      */
     std::shared_ptr<BasicBlock> curBlk;
-    /**
-     * @brief the next temporary variable ID to use
-     */
-    int nextTempId = 0;
-    /**
-     * @brief the next label ID to use
-     */
-    int nextLabelId = 0;
   } ctx_;
 
   /**

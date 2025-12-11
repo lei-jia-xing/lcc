@@ -37,6 +37,27 @@ public:
    */
   void buildCFG();
 
+  /**
+   * @brief allocate a new temporary ID
+   *
+   * @return temporary ID
+   */
+  int allocateTemp();
+
+  /**
+   * @brief getter for temporary count
+   *
+   * @return temporary count
+   */
+  int getTempCount() const;
+
+  /**
+   * @brief allocate a new label ID
+   *
+   * @return a label ID
+   */
+  int allocateLabel();
+
 private:
   /**
    * @brief funtion name
@@ -50,4 +71,14 @@ private:
    * @brief function local block id
    */
   int _nextBlockId = 0;
+
+  /**
+   * @brief function local temporary id
+   */
+  int _nextTempId = 0;
+
+  /**
+   * @brief funtion local label id
+   */
+  int _nextLabelId = 0;
 };

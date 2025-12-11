@@ -125,3 +125,7 @@ void Function::buildCFG() {
 
   _blocks = std::move(newBlocks);
 }
+
+int Function::allocateTemp() { return _nextTempId++; }
+int Function::getTempCount() const { return _nextTempId; }
+int Function::allocateLabel() { return _nextLabelId++; }
