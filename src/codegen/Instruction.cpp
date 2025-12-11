@@ -69,6 +69,8 @@ static const char *opToStr(OpCode op) {
     return "RETURN";
   case OpCode::ALLOCA:
     return "ALLOCA";
+  case OpCode::PHI:
+    return "PHI";
   }
   return "OP";
 }
@@ -141,4 +143,10 @@ Instruction Instruction::MakeReturn(const Operand &value) {
 Instruction Instruction::MakeAlloca(const Operand &symbol,
                                     const Operand &size) {
   return Instruction(OpCode::ALLOCA, symbol, size);
+}
+Instruction Instruction::MakePhi(const Operand &res) {
+  return Instruction(OpCode::PHI, res);
+}
+void Instruction::addPhiArg(const Operand &val, BasicBlock *bb) {
+  _phiArgs.emplace_back(val, bb);
 }
