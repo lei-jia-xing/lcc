@@ -11,7 +11,8 @@ add_library(Codegen
     codegen/Operand.cpp
     optimize/DominatorTree.cpp
     optimize/LoopAnalysis.cpp
-    optimize/LICM.cpp)
+    optimize/LICM.cpp
+    optimize/Mem2Reg.cpp)
 
 add_library(Backend
     backend/AsmGen.cpp

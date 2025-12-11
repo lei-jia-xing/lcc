@@ -4,6 +4,7 @@
 #include "optimize/DominatorTree.hpp"
 #include "optimize/LICM.hpp"
 #include "optimize/LoopAnalysis.hpp"
+#include "optimize/Mem2Reg.hpp"
 #include <functional>
 #include <set>
 #include <unordered_map>
@@ -510,6 +511,10 @@ void runDefaultQuadOptimizations(Function &fn) {
   // Run LICM first
   DominatorTree dt;
   dt.run(fn);
+
+  // Mem2RegPass mem2reg;
+  // mem2reg.run(fn, dt);
+  //
   LoopAnalysis la;
   la.run(fn, dt);
   if (!la.getLoops().empty()) {
