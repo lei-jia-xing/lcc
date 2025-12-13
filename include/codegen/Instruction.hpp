@@ -26,7 +26,7 @@ enum class OpCode {
 
   ASSIGN, // ASSIGN src(var|temp|const), -, dst(var|temp)
 
-  LOAD,  // LOAD base(var|temp), [index(var|temp|const)], dst(var|temp)
+  LOAD,  // LOAD base(var|temp), index(var|temp|const), dst(var|temp)
   STORE, // STORE value(var|temp|const), base(var|temp), index(var|temp|const)
 
   IF,    // IF cond(var|temp|const), -, res(label)
@@ -40,7 +40,8 @@ enum class OpCode {
 
   ALLOCA, // ALLOCA var(var), -, size(var|temp|const)
 
-  PHI
+  PHI,
+  NOP
 };
 
 class Instruction {
@@ -68,6 +69,7 @@ public:
   static Instruction MakeReturn(const Operand &value);
   static Instruction MakeAlloca(const Operand &symbol, const Operand &size);
   static Instruction MakePhi(const Operand &res);
+  static Instruction MakeNop();
 
   std::string toString() const;
 

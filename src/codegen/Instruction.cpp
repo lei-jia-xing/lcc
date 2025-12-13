@@ -71,12 +71,18 @@ static const char *opToStr(OpCode op) {
     return "ALLOCA";
   case OpCode::PHI:
     return "PHI";
+  case OpCode::NOP:
+    return "NOP";
   }
   return "OP";
 }
 
 std::string Instruction::toString() const {
   std::ostringstream oss;
+  if (_op == OpCode::NOP) {
+    oss << "NOP";
+    return oss.str();
+  }
   oss << opToStr(_op);
   bool hasA1 = _arg1.getType() == OperandType::Variable ||
                _arg1.getType() == OperandType::Temporary ||
@@ -147,6 +153,7 @@ Instruction Instruction::MakeAlloca(const Operand &symbol,
 Instruction Instruction::MakePhi(const Operand &res) {
   return Instruction(OpCode::PHI, res);
 }
+Instruction Instruction::MakeNop() { return Instruction(OpCode::NOP); }
 void Instruction::addPhiArg(const Operand &val, BasicBlock *bb) {
   _phiArgs.emplace_back(val, bb);
 }
