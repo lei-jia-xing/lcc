@@ -1,7 +1,5 @@
 # LCC编译器 - IR设计文档
 
-> 本文档与 `include/codegen/Instruction.hpp`、`src/codegen/*.cpp` 以及后端 `backend/AsmGen.cpp`、`backend/RegisterAllocator.cpp` 的当前实现同步。若新增指令或修改语义，请同时更新此文件。
-
 ## 设计总览
 
 - **表示形式**：四元式三地址码 `(op, arg1, arg2, result)`。
@@ -44,8 +42,8 @@ Module
 
 | OpCode | 形式 | 说明 |
 |--------|------|------|
-| `ADD/SUB/MUL/DIV/MOD` | `op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)` | `DIV/MOD` 由后端降为 `div` + `mflo/mfhi` |
-| `NEG` | `NEG arg1(...), -, res(temp|const)` | 一元取负 |
+| `ADD/SUB/MUL/DIV/MOD` | `op arg1(var\|temp\|const), arg2(var\|temp\|const), res(temp\|const)` | `DIV/MOD` 由后端降为 `div` + `mflo/mfhi` |
+| `NEG` | `NEG arg1(...), -, res(temp\|const)` | 一元取负 |
 | `EQ/NEQ/LT/LE/GT/GE` | 同二元格式 | 比较结果归一化到 0/1 |
 | `AND/OR` | `AND/OR arg1, arg2, res` | 逻辑值模式（非短路）。短路由控制流构造实现 |
 | `NOT` | `NOT arg1, -, res` | `res = !arg1` |
@@ -54,27 +52,27 @@ Module
 
 | OpCode | 形式 | 说明 |
 |--------|------|------|
-| `ASSIGN` | `ASSIGN src(var|temp|const), -, dst(var|temp)` | 通用赋值，后端会判定是否需要落栈 |
-| `LOAD` | `LOAD base(var|temp), index(var|temp|const|empty), dst(var|temp)` | 读取数组/指针元素。`index` 为空视为 `*base` |
-| `STORE` | `STORE value(var|temp|const), base(var|temp), index(var|temp|const|empty)` | 写数组/指针 |
-| `ALLOCA` | `ALLOCA var(var), -, size(var|temp|const)` | 分配 `size` 个 word。全局进入 `.data`，局部在栈帧分配 |
+| `ASSIGN` | `ASSIGN src(var\|temp\|const), -, dst(var\|temp)` | 通用赋值，后端会判定是否需要落栈 |
+| `LOAD` | `LOAD base(var\|temp), index(var\|temp\|const\|empty), dst(var\|temp)` | 读取数组/指针元素,`index` 为空视为 `*base` |
+| `STORE` | `STORE value(var\|temp\|const), base(var\|temp), index(var\|temp\|const\|empty)` | 写数组/指针,`index`为空视为指针(虽然测试样例并不会出现指针赋值的操作) |
+| `ALLOCA` | `ALLOCA var(var), -, size(var\|temp\|const)` | 分配 `size` 个 word。全局进入 `.data`，局部在栈帧分配 |
 
 ### 控制流
 
-| OpCode | 形式 | 含义 |
+| OpCode | 形式 | 说明 |
 |--------|------|------|
 | `LABEL` | `LABEL -, -, res(label)` | 基本块入口。`CodeGen` 负责插入 |
 | `GOTO`  | `GOTO -, -, res(label)` | 无条件跳转 |
-| `IF`    | `IF cond(var|temp|const), -, res(label)` | `cond != 0` 时跳转 |
-| `RETURN`| `RETURN -, -, res(var|temp|const|empty)` | 函数返回。空表示 `void` |
+| `IF`    | `IF cond(var\|temp\|const), -, res(label)` | `cond != 0` 时跳转 |
+| `RETURN`| `RETURN -, -, res(var\|temp\|const\|empty)` | 函数返回。空表示 `void` |
 
 ### 函数调用
 
-| OpCode | 形式 | 角色 | 说明 |
-|--------|------|------|------|
-| `PARAM` | `PARAM idx(const), -, res(var)` | **函数定义阶段**使用：记录“第 idx 个形式参数绑定哪个符号”。必须出现在入口块的开头 |
-| `ARG` | `ARG arg(var|temp|const), -, -` | **调用方**使用：将一个实参排入队列。后端在 `CALL` 时顺序消费 |
-| `CALL` | `CALL argc(const), func(label), res(temp|empty)` | 发起调用。`argc` = 之前发射的 `ARG` 数；`res` 可为空表示忽略返回值 |
+| OpCode | 形式 | 说明 |
+|--------|------|------|
+| `PARAM` | `PARAM idx(const), -, res(var)`  | **函数定义阶段**使用：记录“第 idx 个形式参数绑定哪个符号”。必须出现在入口块的开头 |
+| `ARG` | `ARG arg(var\|temp\|const), -, -` | **调用方**使用：将一个实参排入队列。后端在 `CALL` 时顺序消费 |
+| `CALL` | `CALL argc(const), func(label), res(temp\|empty)` | 发起调用。`argc` = 之前发射的 `ARG` 数；`res` 可为空表示忽略返回值 |
 
 > 前端保证：`CALL` 之前连续出现 `argc` 条 `ARG`，且中途不会夹杂其他 `CALL`。
 
@@ -92,68 +90,9 @@ Module
 - `CodeGen` 在函数入口自动发射 `PARAM idx, var`，同时根据 AST 插入 `ALLOCA`、`ASSIGN`、`LOAD/STORE` 等。
 - `IRModuleView` 仅提供对函数/全局的只读访问，后端在遍历过程中不会修改 IR。
 
-## 默认优化 Pass
-
-`runDefaultQuadOptimizations(Function &fn)` 依次执行：
-
-1. **ConstFoldPass**
-  - 若算术/比较/逻辑的两个操作数均为常量，则改写为 `ASSIGN const`。
-  - `IF const`：真变 `GOTO label`，假变空操作（`ASSIGN` 占位）。
-2. **LocalDCEPass**
-  - 在基本块内反向扫描，删除“无副作用、结果为临时且未再使用”的指令。
-  - `STORE/GOTO/IF/CALL/RETURN/PARAM/ALLOCA` 等都视为有副作用，不会被删除。
-
-尚未启用跨块优化（CSE、循环优化等）。IR 保持易读，方便后续扩展。
-
-## 示例
-
-### 条件语句
-
-```c
-if (x > 0) {
- y = 1;
-} else {
- y = 2;
-}
-```
-
-```
-LABEL L0
-GT x, 0, %t0
-IF %t0, L1
-ASSIGN 2, -, y
-GOTO L2
-LABEL L1
-ASSIGN 1, -, y
-LABEL L2
-```
-
-### 函数调用
-
-```c
-int bar(int x) {
- int t = foo(x, 1);
- return t + 2;
-}
-```
-
-```
-LABEL L0
-PARAM 0, x
-ARG x
-ARG 1
-CALL 2, foo, %t0
-ADD %t0, 2, %t1
-RETURN %t1
-```
-
 ## 与后端交互要点
 
-- `Label` ID 在函数内必须唯一且为非负整数，后端以 `func_L{id}` 命名。
+- `Label` ID 在函数内必须唯一且为非负整数，后端以 `func_L{id}` 命名，但是在IR中没有体现。
 - `ALLOCA` 的 `size` 单位是 **word**。后端在 `.data` 或栈帧中实际分配 `size * 4` 字节。
 - `globals` 中允许混合 `ALLOCA/ASSIGN/STORE`，`AsmGen::emitDataSection` 会利用常量信息输出 `.word` 或运行期初始化代码。
 - `ARG/CALL`：IR 层需保证不会把 `ARG` 与其他 `CALL`/`ARG` 交叉嵌套，避免后端状态污染。
-
----
-
-配合同目录下的 `backend.txt`、`overview.md`、`semantic.md`，本文档构成了 AST → IR → MIPS 的中间层说明。后续若扩展指令或引入新优化，请以此为基准同步更新。
