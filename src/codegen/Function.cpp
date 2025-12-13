@@ -107,14 +107,7 @@ void Function::buildCFG() {
     auto &lastInst = insts.back();
     OpCode op = lastInst->getOp();
 
-    if (op == OpCode::GOTO) {
-      int targetLabel = lastInst->getResult().asInt();
-      auto it = labelToBlock.find(targetLabel);
-      if (it != labelToBlock.end()) {
-        blk->jumpTarget = it->second;
-      }
-    } else if (op == OpCode::IF) {
-      // IF cond, -, label
+    if (op == OpCode::GOTO || op == OpCode::IF) {
       int targetLabel = lastInst->getResult().asInt();
       auto it = labelToBlock.find(targetLabel);
       if (it != labelToBlock.end()) {
@@ -125,7 +118,6 @@ void Function::buildCFG() {
 
   _blocks = std::move(newBlocks);
 }
-
 int Function::allocateTemp() { return _nextTempId++; }
 int Function::getTempCount() const { return _nextTempId; }
 int Function::allocateLabel() { return _nextLabelId++; }
