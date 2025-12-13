@@ -19,18 +19,14 @@ static int log2IfPowerOf2(int n) {
 }
 
 AsmGen::AsmGen() {
-  static const char *Regs[NUM_ALLOCATABLE_REGS] = {"$s0", "$s1", "$s2", "$s3",
-                                                   "$s4", "$s5", "$s6", "$s7"};
+  static const char *Regs[NUM_ALLOCATABLE_REGS] = {
+      "$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6",
+      "$s7", "$t0", "$t1", "$t2", "$t3", "$t4", "$t5"};
   regs_.reserve(NUM_ALLOCATABLE_REGS);
   for (int i = 0; i < NUM_ALLOCATABLE_REGS; ++i) {
     regs_.push_back({Regs[i], false, -1});
   }
-  scratchRegs_.push_back({"$t0", 0});
-  scratchRegs_.push_back({"$t1", 0});
-  scratchRegs_.push_back({"$t2", 0});
-  scratchRegs_.push_back({"$t3", 0});
-  scratchRegs_.push_back({"$t4", 0});
-  scratchRegs_.push_back({"$t5", 0});
+
   scratchRegs_.push_back({"$t6", 0});
   scratchRegs_.push_back({"$t7", 0});
   scratchRegs_.push_back({"$t8", 0});
@@ -655,7 +651,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::LOAD: {
-    // LOAD base(var|temp), [index(var|temp|const)], dst(temp)
+    // LOAD base(var|temp), index(var|temp|const), dst(temp)
     std::string baseReg;
     const Symbol *baseSym = nullptr;
 
@@ -882,7 +878,8 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::ALLOCA:
-  case OpCode::PHI: {
+  case OpCode::PHI:
+  case OpCode::NOP: {
     break;
   }
   }
