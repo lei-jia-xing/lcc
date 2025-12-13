@@ -49,16 +49,33 @@ void DominatorTree::run(Function &F) {
       }
 
       // Compute intersection of dominators of predecessors
-      std::set<BasicBlock *> newDominators = _dominators[preds[0]];
-      for (size_t i = 1; i < preds.size(); ++i) {
-        std::set<BasicBlock *> predDom = _dominators[preds[i]];
-        std::set<BasicBlock *> intersection;
-        std::set_intersection(
-            newDominators.begin(), newDominators.end(), predDom.begin(),
-            predDom.end(), std::inserter(intersection, intersection.begin()));
-        newDominators = intersection;
+      std::set<BasicBlock *> newDominators;
+      bool firstValidPred = true;
+
+      for (BasicBlock *pred : preds) {
+        if (_dominators[pred].empty()) {
+          continue;
+        }
+        if (firstValidPred) {
+          newDominators = _dominators[pred];
+          firstValidPred = false;
+        } else {
+          std::set<BasicBlock *> intersection;
+          std::set_intersection(
+              newDominators.begin(), newDominators.end(),
+              _dominators[pred].begin(), _dominators[pred].end(),
+              std::inserter(intersection, intersection.begin()));
+          newDominators = intersection;
+        }
       }
 
+      if (firstValidPred) {
+        if (!_dominators[bb].empty()) {
+          _dominators[bb].clear(); // Clear dominators for unreachable block
+          changed = true;
+        }
+        continue;
+      }
       // Add current block itself
       newDominators.insert(bb);
 
@@ -139,15 +156,37 @@ std::vector<BasicBlock *> DominatorTree::getPredecessors(BasicBlock *BB,
 
   for (const auto &b_ptr : blocks) {
     BasicBlock *currentBlock = b_ptr.get();
-    if (currentBlock == BB)
-      continue; // A block cannot be its own predecessor in this context
-
-    // Check fallthrough edge
-    if (currentBlock->next.get() == BB) {
-      predecessors.push_back(currentBlock);
+    auto &insts = currentBlock->getInstructions();
+    auto goesToBB = false;
+    bool hasBarrier = false;
+    if (insts.empty()) {
+      if (currentBlock->next.get() == BB) {
+        goesToBB = true;
+      }
+    } else {
+      for (auto &inst_ptr : insts) {
+        Instruction *inst = inst_ptr.get();
+        OpCode op = inst->getOp();
+        if (op == OpCode::GOTO) {
+          if (currentBlock->jumpTarget.get() == BB) {
+            goesToBB = true;
+          }
+          hasBarrier = true;
+        } else if (op == OpCode::IF) {
+          if (currentBlock->jumpTarget.get() == BB) {
+            goesToBB = true;
+          }
+        } else if (op == OpCode::RETURN) {
+          hasBarrier = true;
+        }
+      }
+      if (!hasBarrier) {
+        if (currentBlock->next.get() == BB) {
+          goesToBB = true;
+        }
+      }
     }
-    // Check jump target edge
-    if (currentBlock->jumpTarget.get() == BB) {
+    if (goesToBB) {
       predecessors.push_back(currentBlock);
     }
   }
