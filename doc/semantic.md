@@ -8,7 +8,7 @@ Semantic Analyzer（语义分析器）是 LCC 编译器的第三个阶段，负�
 
 ### 类结构
 
-`SemanticAnalyzer` 的对外接口和内部成员在头文件 `SemanticAnalyzer.hpp` 中定义，核心结构如下所示（省略了一些与实现无关的细节）：
+`SemanticAnalyzer` 的对外接口和内部成员在头文件 `SemanticAnalyzer.hpp` 中定义，核心结构如下所示（省略了一些细节）：
 
 ```cpp
 class SemanticAnalyzer {
