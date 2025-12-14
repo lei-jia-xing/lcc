@@ -100,6 +100,7 @@ void SemanticAnalyzer::visit(ConstDef *node, TypePtr type) {
     TypePtr elem = std::make_shared<Type>(*type);
     elem->category = Type::Category::Basic;
     defType = Type::create_array_type(elem, 0);
+    defType->is_const = true;
   }
   node->type = defType;
   auto symbol = std::make_shared<Symbol>(nextSymbolId++, node->ident, defType,

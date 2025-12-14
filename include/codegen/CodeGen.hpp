@@ -7,6 +7,7 @@
 #include "parser/AST.hpp"
 #include "semantic/Symbol.hpp"
 #include "semantic/SymbolTable.hpp"
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -130,8 +131,7 @@ private:
   } ctx_;
 
   /**
-   * @brief record of constant values for variables known at compile time, e.g.
-   * const int maxn = 1000
+   * @brief record of constant values for variables known at compile time
    */
   std::unordered_map<std::shared_ptr<Symbol>, int> constValues_;
   /**
@@ -142,6 +142,10 @@ private:
    * @brief all string literal symbols
    */
   std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals_;
+  /**
+   * @brief all constant array values
+   */
+  std::map<std::shared_ptr<Symbol>, std::vector<int>> constArrayValues_;
   /**
    * @brief the next string literal ID to use
    */

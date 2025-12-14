@@ -12,6 +12,7 @@ void CodeGen::reset() {
   ctx_.func = nullptr;
   ctx_.curBlk.reset();
   constValues_.clear();
+  constArrayValues_.clear();
   stringLiterals_.clear();
   nextStringId_ = 0;
   nextStaticId_ = 0;
@@ -79,6 +80,19 @@ bool CodeGen::tryEvalConst(PrimaryExp *pe, int &outVal) {
       std::shared_ptr<Symbol> sym =
           pe->lval->symbol; // Use symbol from AST node
       if (sym && sym->type && sym->type->is_const) {
+        if (pe->lval->arrayIndex) {
+          int idx = 0;
+          if (tryEvalExp(pe->lval->arrayIndex.get(), idx)) {
+            auto it = constArrayValues_.find(sym);
+            if (it != constArrayValues_.end()) {
+              if (idx >= 0 && idx < it->second.size()) {
+                outVal = it->second[idx];
+                return true;
+              }
+            }
+          }
+          return false;
+        }
         auto it = constValues_.find(sym);
         if (it != constValues_.end()) {
           outVal = it->second;
@@ -466,17 +480,23 @@ void CodeGen::genFor(ForStmt *stmt) {
   if (!stmt)
     return;
 
+  if (stmt->initStmt)
+    genForAssign(stmt->initStmt.get());
+
   Operand L_cond = newLabel();
   Operand L_body = newLabel();
   Operand L_step = newLabel();
   Operand L_end = newLabel();
-
-  if (stmt->initStmt)
-    genForAssign(stmt->initStmt.get());
-
   emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_cond)));
 
+  placeLabel(L_cond);
   pushLoop(L_end.asInt(), L_step.asInt());
+  if (stmt->cond) {
+    genCond(stmt->cond.get(), L_body.asInt(), L_end.asInt());
+  } else {
+    // default is true
+    emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_body)));
+  }
 
   placeLabel(L_body);
   if (stmt->bodyStmt)
@@ -487,14 +507,6 @@ void CodeGen::genFor(ForStmt *stmt) {
   if (stmt->updateStmt)
     genForAssign(stmt->updateStmt.get());
   emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_cond)));
-
-  placeLabel(L_cond);
-  if (stmt->cond) {
-    genCond(stmt->cond.get(), L_body.asInt(), L_end.asInt());
-  } else {
-    // default is true
-    emit(std::make_unique<Instruction>(Instruction::MakeGoto(L_body)));
-  }
 
   placeLabel(L_end);
   popLoop();
@@ -686,13 +698,20 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
     emit(std::make_unique<Instruction>(Instruction::MakeAssign(v, var)));
     return;
   }
+  std::vector<int> arrayVals;
   // array
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &ce = init->arrayExps[i];
     Operand v = genConstExp(ce.get());
+    if (v.getType() == OperandType::ConstantInt) {
+      arrayVals.push_back(v.asInt());
+    } else {
+      arrayVals.push_back(0);
+    }
     emit(std::make_unique<Instruction>(
         Instruction::MakeStore(v, var, Operand::ConstantInt(i))));
   }
+  constArrayValues_[sym] = std::move(arrayVals);
 }
 
 void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
