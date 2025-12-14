@@ -40,8 +40,8 @@ enum class OpCode {
 
   ALLOCA, // ALLOCA var(var), -, size(var|temp|const)
 
-  PHI,
-  NOP
+  PHI, // PHI -, -, res(var|temp)
+  NOP  // NOP, -, -. -
 };
 
 class Instruction {
@@ -80,6 +80,7 @@ public:
 
   void addPhiArg(const Operand &val, BasicBlock *bb);
   const std::vector<std::pair<Operand, BasicBlock *>> &getPhiArgs() const;
+  std::vector<std::pair<Operand, BasicBlock *>> &getPhiArgs();
   void setOp(OpCode op) { _op = op; }
   void setArg1(const Operand &v) { _arg1 = v; }
   void setArg2(const Operand &v) { _arg2 = v; }

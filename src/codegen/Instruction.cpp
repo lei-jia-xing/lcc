@@ -161,3 +161,6 @@ const std::vector<std::pair<Operand, BasicBlock *>> &
 Instruction::getPhiArgs() const {
   return _phiArgs;
 }
+std::vector<std::pair<Operand, BasicBlock *>> &Instruction::getPhiArgs() {
+  return _phiArgs;
+}
