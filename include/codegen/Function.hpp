@@ -58,6 +58,13 @@ public:
    */
   int allocateLabel();
 
+  /**
+   * @brief debug function to dump CFG to stderr
+   *
+   * @param F Function to dump
+   */
+  void dumpCFG(const Function &F);
+
 private:
   /**
    * @brief funtion name

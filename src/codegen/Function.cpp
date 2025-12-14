@@ -1,9 +1,46 @@
 #include "codegen/Function.hpp"
 #include "codegen/Instruction.hpp"
+#include <iostream>
 #include <unordered_map>
 
 Function::Function(std::string name) : _name(std::move(name)) {}
+void Function::dumpCFG(const Function &F) {
+  std::cerr << "\n================ [CFG DUMP START] ================\n";
+  std::cerr << "Function: " << F.getName() << "\n";
 
+  const auto &blocks = F.getBlocks();
+  for (const auto &bbPtr : blocks) {
+    BasicBlock *bb = bbPtr.get();
+    std::cerr << "\n[Block ID: " << bb->getId() << "] Address: " << bb << "\n";
+
+    std::cerr << "  Successors: ";
+    if (bb->jumpTarget)
+      std::cerr << "Target(Block " << bb->jumpTarget->getId() << ") ";
+    if (bb->next)
+      std::cerr << "Next(Block " << bb->next->getId() << ") ";
+    std::cerr << "\n";
+
+    std::cerr << "  Instructions:\n";
+    int index = 0;
+    for (const auto &inst : bb->getInstructions()) {
+      std::cerr << "    " << index++ << ": " << inst->toString();
+
+      if (inst->getOp() == OpCode::LABEL && index > 1) {
+        std::cerr << " <--- ERROR: Label NOT at beginning!";
+      }
+      if (inst->getOp() == OpCode::PHI && index == 1) {
+        if (bb->getInstructions().size() > 1) {
+          auto nextInst = std::next(bb->getInstructions().begin());
+          if ((*nextInst)->getOp() == OpCode::LABEL) {
+            std::cerr << " <--- FATAL ERROR: PHI before LABEL!";
+          }
+        }
+      }
+      std::cerr << "\n";
+    }
+  }
+  std::cerr << "================ [CFG DUMP END] ==================\n\n";
+}
 std::shared_ptr<BasicBlock> Function::createBlock() {
   auto blk = std::make_shared<BasicBlock>(_nextBlockId++);
   _blocks.emplace_back(blk);
