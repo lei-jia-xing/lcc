@@ -12,3 +12,18 @@ add_executable(Compiler main.cpp)
 
 target_link_libraries(Compiler Lexer Parser Semanticanalyzer
 ErrorReporter Codegen Backend)
+
+# Linter and formatter targets
+file(GLOB_RECURSE ALL_SOURCE_FILES
+    ${CMAKE_SOURCE_DIR}/src/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/*.h
+    ${CMAKE_SOURCE_DIR}/include/*.h
+    ${CMAKE_SOURCE_DIR}/*.cpp)
+
+add_custom_target(format
+    COMMAND clang-format -i ${ALL_SOURCE_FILES}
+    COMMENT "Formatting code with clang-format")
+
+add_custom_target(lint
+    COMMAND clang-tidy ${ALL_SOURCE_FILES} -- -I${CMAKE_SOURCE_DIR}/include
+    COMMENT "Linting code with clang-tidy")
