@@ -143,7 +143,7 @@ private:
     bool inUse = false;
   };
   /**
-   * @brief remaining scratch registers, $t8, $t9
+   * @brief remaining scratch registers
    */
   std::vector<ScratchRegState> scratchRegs_;
 
@@ -161,7 +161,7 @@ private:
    */
   bool emitComments_ = true;
   std::vector<RegDesc> regs_;
-  static const int NUM_ALLOCATABLE_REGS = 14; // $s0-$s7, $t0-t5
+  static const int NUM_ALLOCATABLE_REGS = 8; // $s0-$s7
   int paramIndex_ = 0;
   const IRModuleView *curMod_ = nullptr;
   std::string curFuncName_;

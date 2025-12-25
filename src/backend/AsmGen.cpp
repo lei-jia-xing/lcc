@@ -19,14 +19,19 @@ static int log2IfPowerOf2(int n) {
 }
 
 AsmGen::AsmGen() {
-  static const char *Regs[NUM_ALLOCATABLE_REGS] = {
-      "$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6",
-      "$s7", "$t0", "$t1", "$t2", "$t3", "$t4", "$t5"};
+  static const char *Regs[NUM_ALLOCATABLE_REGS] = {"$s0", "$s1", "$s2", "$s3",
+                                                   "$s4", "$s5", "$s6", "$s7"};
   regs_.reserve(NUM_ALLOCATABLE_REGS);
   for (int i = 0; i < NUM_ALLOCATABLE_REGS; ++i) {
     regs_.push_back({Regs[i], false, -1});
   }
 
+  scratchRegs_.push_back({"$t0", 0});
+  scratchRegs_.push_back({"$t1", 0});
+  scratchRegs_.push_back({"$t2", 0});
+  scratchRegs_.push_back({"$t3", 0});
+  scratchRegs_.push_back({"$t4", 0});
+  scratchRegs_.push_back({"$t5", 0});
   scratchRegs_.push_back({"$t6", 0});
   scratchRegs_.push_back({"$t7", 0});
   scratchRegs_.push_back({"$t8", 0});
@@ -183,35 +188,35 @@ void AsmGen::emitTextSection(const IRModuleView &mod, std::ostream &out) {
   }
   out << "printf:\n";
   out << "  addiu $sp, $sp, -16\n";
-  out << "  sw $a1, 0($sp)\n";
-  out << "  sw $a2, 4($sp)\n";
-  out << "  sw $a3, 8($sp)\n";
-  out << "  move $t0, $a0      # t0: format string cursor\n";
-  out << "  move $t1, $sp      # t1: current argument pointer (starts at "
+  out << "  sw $a1, 4($sp)\n";
+  out << "  sw $a2, 8($sp)\n";
+  out << "  sw $a3, 12($sp)\n";
+  out << "  move $t6, $a0          # t6: format string cursor\n";
+  out << "  addiu $t7, $sp, 4      # t7: current argument pointer (starts at "
          "$a1)\n";
   out << "\n";
   out << "printf_loop:\n";
-  out << "  lbu $a0, 0($t0)\n";
+  out << "  lbu $a0, 0($t6)\n";
   out << "  beq $a0, $zero, printf_end\n";
-  out << "  addiu $t0, $t0, 1\n"; // move cursor
-  out << "  li $t2, 37         # 37 is '%'\n";
-  out << "  beq $a0, $t2, printf_format\n";
+  out << "  addiu $t6, $t6, 1\n"; // move cursor
+  out << "  li $t8, 37         # 37 is '%'\n";
+  out << "  beq $a0, $t8, printf_format\n";
   out << "  li $v0, 11\n";
   out << "  syscall\n";
   out << "  j printf_loop\n";
   out << "\n";
   out << "printf_format:\n";
-  out << "  lbu $a0, 0($t0)\n";
-  out << "  addiu $t0, $t0, 1\n";
-  out << "  li $t2, 100        # 100 is 'd'\n";
-  out << "  beq $a0, $t2, printf_int\n";
+  out << "  lbu $a0, 0($t6)\n";
+  out << "  addiu $t6, $t6, 1\n";
+  out << "  li $t8, 100        # 100 is 'd'\n";
+  out << "  beq $a0, $t8, printf_int\n";
   out << "  li $v0, 11\n";
   out << "  syscall\n";
   out << "  j printf_loop\n";
   out << "\n";
   out << "printf_int:\n";
-  out << "  lw $a0, 0($t1)     # Load arg from stack using t1\n";
-  out << "  addiu $t1, $t1, 4  # Move arg pointer to next\n";
+  out << "  lw $a0, 0($t7)     # Load arg from stack using t7\n";
+  out << "  addiu $t7, $t7, 4  # Move arg pointer to next\n";
   out << "  li $v0, 1\n";
   out << "  syscall\n";
   out << "  j printf_loop\n";
@@ -263,8 +268,8 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
 
   out << func->getName() << ":\n";
   if (frameSize_ > 32767) {
-    out << "  li $t0, -" << frameSize_ << "\n";
-    out << "  addu $sp, $sp, $t0\n" << "\n";
+    out << "  li $t6, -" << frameSize_ << "\n";
+    out << "  addu $sp, $sp, $t6\n" << "\n";
   } else {
     out << "  addiu $sp, $sp, -" << frameSize_ << "\n";
   }
@@ -274,7 +279,13 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
     int regId = calleeSavedRegs[i];
     int offset = savedRegBase + i * 4;
-    out << "  sw " << regs_[regId].name << ", " << offset << "($sp)\n";
+    if (offset >= -32768 && offset <= 32767) {
+      out << "  sw " << regs_[regId].name << ", " << offset << "($sp)\n";
+    } else {
+      out << "  li $t6, " << offset << "\n";
+      out << "  addu $t6, $sp, $t6\n";
+      out << "  sw " << regs_[regId].name << ", 0($t6)\n";
+    }
   }
   out << "  move $fp, $sp\n";
 
@@ -285,7 +296,13 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     auto it = locals_.find(sym);
     if (it != locals_.end()) {
       int off = it->second.offset;
-      out << "  sw " << aregs[i] << ", " << off << "($fp)\n";
+      if (off >= -32768 && off <= 32767) {
+        out << "  sw " << aregs[i] << ", " << off << "($fp)\n";
+      } else {
+        out << "  li $t6, " << off << "\n";
+        out << "  addu $t6, $fp, $t6\n";
+        out << "  sw " << aregs[i] << ", 0($t7)\n";
+      }
     }
   }
   for (size_t i = 4; i < fsz; ++i) {
@@ -300,9 +317,20 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
     int offCaller =
         frameSize_ + (i - 4) * 4; // jump out current frame to the previous
                                   // frame's stack to get extra params
-
-    out << "  lw $t0, " << offCaller << "($fp)\n";
-    out << "  sw $t0, " << offLocal << "($fp)\n";
+    if (offCaller >= -32768 && offCaller <= 32767) {
+      out << "  lw $t6, " << offCaller << "($fp)\n";
+    } else {
+      out << "  li $t7, " << offCaller << "\n";
+      out << "  addu $t7, $fp, $t7\n";
+      out << "  lw $t6, 0($t7)\n";
+    }
+    if (offLocal >= -32768 && offLocal <= 32767) {
+      out << "  sw $t6, " << offLocal << "($fp)\n";
+    } else {
+      out << "  li $t7, " << offLocal << "\n";
+      out << "  addu $t7, $fp, $t7\n";
+      out << "  sw $t6, 0($t7)\n";
+    }
   }
   currentEpilogueLabel_ = func->getName() + std::string("_END");
 
@@ -337,14 +365,20 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
     int regId = calleeSavedRegs[i];
     int offset = savedRegBase + i * 4;
-    out << "  lw " << regs_[regId].name << ", " << offset << "($sp)\n";
+    if (offset >= -32768 && offset <= 32767) {
+      out << "  lw " << regs_[regId].name << ", " << offset << "($sp)\n";
+    } else {
+      out << "  li $t6, " << offset << "\n";
+      out << "  addu $t6, $sp, $t6\n";
+      out << "  lw " << regs_[regId].name << ", 0($t6)\n";
+    }
   }
 
   out << "  lw $ra, 0($fp)\n";
   out << "  lw $fp, 4($fp)\n";
   if (frameSize_ > 32767) {
-    out << "  li $t0, " << frameSize_ << "\n";
-    out << "  addu $sp, $sp, $t0\n";
+    out << "  li $t6, " << frameSize_ << "\n";
+    out << "  addu $sp, $sp, $t6\n";
   } else {
     out << "  addiu $sp, $sp, " << frameSize_ << "\n";
   }
@@ -390,7 +424,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
 
   auto storeToSpill = [&](int tempId, const std::string &reg) {
     // store in stack frame when register is spilled
-    if (_regAllocator.isSpilled(tempId)) {
+    if (_spillOffsets.count(tempId)) {
       int offset = _spillOffsets[tempId];
       if (offset >= -32768 && offset <= 32767) {
         out << "  sw " << reg << ", " << offset << "($fp)\n";
@@ -405,8 +439,15 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   };
   auto getResultReg = [&](const Operand &r) -> std::string {
     // allocate register according to Operand r
-    if (isTemp(r) && !_regAllocator.isSpilled(r.asInt())) {
-      return regForTemp(r.asInt());
+    if (isTemp(r)) {
+      if (_spillOffsets.count(r.asInt())) {
+        return allocateScratch();
+      }
+      int regIdx = _regAllocator.getReg(r.asInt());
+      if (regIdx != -1) {
+        return regForTemp(r.asInt());
+      }
+      return allocateScratch();
     }
     return allocateScratch();
   };
@@ -670,8 +711,13 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           }
         }
         if (isArray && !isParam) {
-          out << "  addiu " << baseReg << ", $fp, " << lit->second.offset
-              << "\n";
+          int offset = lit->second.offset;
+          if (offset >= -32768 && offset <= 32767) {
+            out << "  addiu " << baseReg << ", $fp, " << offset << "\n";
+          } else {
+            out << "  li " << baseReg << ", " << offset << "\n";
+            out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
+          }
         } else {
           out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
@@ -718,6 +764,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       releaseScratch(offsetReg);
     }
     storeResult(res, dstReg, out);
+    releaseScratch(baseReg);
     if (!indexReg.empty()) {
       releaseScratch(indexReg);
     }
@@ -744,8 +791,13 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
           }
         }
         if (isArray && !isParam) {
-          out << "  addiu " << baseReg << ", $fp, " << lit->second.offset
-              << "\n";
+          int offset = lit->second.offset;
+          if (offset >= -32768 && offset <= 32767) {
+            out << "  addiu " << baseReg << ", $fp, " << offset << "\n";
+          } else {
+            out << "  li " << baseReg << ", " << offset << "\n";
+            out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
+          }
         } else {
           out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
@@ -836,7 +888,16 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       for (int i = 0; i < extraCount; ++i) {
         const Operand &arg = pendingExtraArgs_[i];
         std::string r = getRegister(arg, out);
-        out << "  sw " << r << ", " << (i * 4) << "($sp)\n";
+        int offset = i * 4;
+        if (offset >= -32768 && offset <= 32767) {
+          out << "  sw " << r << ", " << offset << "($sp)\n";
+        } else {
+          std::string offReg = allocateScratch();
+          out << "  li " << offReg << ", " << offset << "\n";
+          out << "  addu " << offReg << ", $sp, " << offReg << "\n";
+          out << "  sw " << r << ", 0(" << offReg << ")\n";
+          releaseScratch(offReg);
+        }
         releaseScratch(r);
       }
     }
@@ -853,7 +914,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       pendingExtraArgs_.clear();
     }
 
-    if (isTemp(res)) {
+    if (fname != "printf" && isTemp(res)) {
       std::string returnReg = getResultReg(res);
       out << "  move " << returnReg << ", $v0\n";
       storeToSpill(res.asInt(), returnReg);
@@ -913,7 +974,7 @@ void AsmGen::comment(std::ostream &out, const std::string &txt) {
 std::string AsmGen::getRegister(const Operand &op, std::ostream &out) {
   switch (op.getType()) {
   case OperandType::Temporary:
-    if (_regAllocator.isSpilled(op.asInt())) {
+    if (_spillOffsets.count(op.asInt())) {
       // Load from spill location
       std::string varScratch = allocateScratch();
       int off = _spillOffsets.at(op.asInt());
@@ -1006,7 +1067,7 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
                          std::ostream &out) {
   switch (op.getType()) {
   case OperandType::Temporary:
-    if (_regAllocator.isSpilled(op.asInt())) {
+    if (_spillOffsets.count(op.asInt())) {
       int off = _spillOffsets.at(op.asInt());
       if (off >= -32768 && off <= 32767) {
         out << "  sw " << reg << ", " << off << "($fp)\n";
@@ -1027,7 +1088,7 @@ void AsmGen::storeResult(const Operand &op, const std::string &reg,
       // Store to local variable
       int off = lit->second.offset;
       if (off >= -32768 && off <= 32767) {
-        out << "  sw " << reg << ", " << lit->second.offset << "($fp)\n";
+        out << "  sw " << reg << ", " << off << "($fp)\n";
       } else {
         std::string addrReg = allocateScratch();
         out << "  li " << addrReg << ", " << off << "\n";

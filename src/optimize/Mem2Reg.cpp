@@ -1,4 +1,5 @@
 #include "optimize/Mem2Reg.hpp"
+#include "codegen/Instruction.hpp"
 #include "codegen/Operand.hpp"
 
 static std::map<BasicBlock *, std::vector<BasicBlock *>>
@@ -6,11 +7,16 @@ buildPredMap(Function &F) {
   std::map<BasicBlock *, std::vector<BasicBlock *>> preds;
   for (auto &bb_ptr : F.getBlocks()) {
     BasicBlock *bb = bb_ptr.get();
-    if (bb->next) {
-      preds[bb->next.get()].push_back(bb);
-    }
+    std::vector<BasicBlock *> successors;
     if (bb->jumpTarget) {
-      preds[bb->jumpTarget.get()].push_back(bb);
+      successors.push_back(bb->jumpTarget.get());
+    }
+    if (bb->next) {
+      successors.push_back(bb->next.get());
+    }
+    // fill in the pred map
+    for (BasicBlock *succ : successors) {
+      preds[succ].push_back(bb);
     }
   }
   return preds;
@@ -29,7 +35,7 @@ bool Mem2RegPass::run(Function &F, DominatorTree &DT) {
   computeDominanceFrontiers(F, DT);
   insertPhiNodes(F);
   if (!F.getBlocks().empty()) {
-    renameVariables(F.getBlocks().front().get(), DT);
+    renameVariables(F.getBlocks().front().get(), DT, F);
   }
   for (auto &bb : F.getBlocks()) {
     auto &insts = bb->getInstructions();
@@ -43,7 +49,15 @@ bool Mem2RegPass::run(Function &F, DominatorTree &DT) {
             remove = true;
           }
         }
-        if (inst->getArg1().getType() == OperandType::Empty) {
+      }
+      if (!remove) {
+        auto usesPromotedVar = [&](const Operand &op) {
+          return op.getType() == OperandType::Variable &&
+                 _allocas.count(op.asSymbol()->id);
+        };
+        if (usesPromotedVar(inst->getArg1()) ||
+            usesPromotedVar(inst->getArg2()) ||
+            usesPromotedVar(inst->getResult())) {
           remove = true;
         }
       }
@@ -53,7 +67,6 @@ bool Mem2RegPass::run(Function &F, DominatorTree &DT) {
     }
     insts = std::move(newInsts);
   }
-  eliminatePhis(F);
   return true;
 }
 
@@ -77,26 +90,29 @@ void Mem2RegPass::collectPromotableAllocas(Function &F) {
       }
     }
   }
+  // collect definition blocks
   for (auto &bb : F.getBlocks()) {
     for (auto &inst : bb->getInstructions()) {
       OpCode op = inst->getOp();
-      if (op == OpCode::ASSIGN) {
-        Operand dst = inst->getResult();
-        if (dst.getType() == OperandType::Variable) {
-          int id = dst.asSymbol()->id;
-          if (_allocas.count(id)) {
-            _allocas[id].defBlocks.insert(bb.get());
+      if (op == OpCode::STORE) {
+        Operand base = inst->getArg2();
+        Operand index = inst->getResult();
+        bool isScalar =
+            index.getType() == OperandType::Empty ||
+            (index.getType() == OperandType::ConstantInt && index.asInt() == 0);
+        if (base.getType() == OperandType::Variable && isScalar) {
+          int varId = base.asSymbol()->id;
+          if (_allocas.count(varId)) {
+            _allocas[varId].defBlocks.insert(bb.get());
           }
         }
-      } else if (op == OpCode::STORE) {
-        Operand base = inst->getArg2();
-        Operand idx = inst->getResult();
-        bool isScalarStore = idx.getType() == OperandType::Empty;
-        if (base.getType() == OperandType::Variable && isScalarStore) {
-          int id = base.asSymbol()->id;
-          if (_allocas.count(id)) {
-            _allocas[id].defBlocks.insert(bb.get());
-          }
+        continue;
+      }
+      Operand dst = inst->getResult();
+      if (dst.getType() == OperandType::Variable) {
+        int varId = dst.asSymbol()->id;
+        if (_allocas.count(varId)) {
+          _allocas[varId].defBlocks.insert(bb.get());
         }
       }
     }
@@ -133,6 +149,9 @@ void Mem2RegPass::insertPhiNodes(Function &F) {
                                        info.defBlocks.end());
     std::set<BasicBlock *> visited;
     std::set<BasicBlock *> hasPhi;
+    for (auto *bb : info.defBlocks) {
+      visited.insert(bb);
+    }
     size_t i = 0;
     while (i < worklist.size()) {
       BasicBlock *X = worklist[i++];
@@ -142,12 +161,18 @@ void Mem2RegPass::insertPhiNodes(Function &F) {
           auto phi =
               std::make_unique<Instruction>(Instruction::MakePhi(phiRes));
           _phiToVarId[phi.get()] = varId;
-          Y->getInstructions().insert(Y->getInstructions().begin(),
-                                      std::move(phi));
+          auto &insts = Y->getInstructions();
+          auto insertIt = insts.begin();
+
+          while (insertIt != insts.end() &&
+                 (*insertIt)->getOp() == OpCode::LABEL) {
+            ++insertIt;
+          }
+          insts.insert(insertIt, std::move(phi));
           hasPhi.insert(Y);
           if (visited.find(Y) == visited.end()) {
-            visited.insert(Y);
             worklist.push_back(Y);
+            visited.insert(Y);
           }
         }
       }
@@ -155,7 +180,8 @@ void Mem2RegPass::insertPhiNodes(Function &F) {
   }
 }
 
-void Mem2RegPass::renameVariables(BasicBlock *bb, DominatorTree &DT) {
+void Mem2RegPass::renameVariables(BasicBlock *bb, DominatorTree &DT,
+                                  Function &F) {
   std::map<int, int> pushCount;
   for (auto &inst : bb->getInstructions()) {
     if (inst->getOp() == OpCode::PHI) {
@@ -170,55 +196,113 @@ void Mem2RegPass::renameVariables(BasicBlock *bb, DominatorTree &DT) {
   auto &insts = bb->getInstructions();
   for (auto &inst : insts) {
     OpCode op = inst->getOp();
-    auto tryReplaceUse = [&](Operand &opToReplace) {
+    // jump over phi(already handled) and alloca(to be removed)
+    if (op == OpCode::PHI || op == OpCode::ALLOCA) {
+      continue;
+    }
+    auto replaceUse = [&](Operand &opToReplace) {
       if (opToReplace.getType() == OperandType::Variable) {
         int id = opToReplace.asSymbol()->id;
         if (_allocas.count(id)) {
           if (!_varStacks[id].empty()) {
             opToReplace = _varStacks[id].top();
-          } else {
-            opToReplace = Operand::ConstantInt(0);
           }
         }
       }
     };
-    if (op != OpCode::PHI && op != OpCode::ALLOCA) {
-      Operand arg1 = inst->getArg1();
-      tryReplaceUse(arg1);
-      inst->setArg1(arg1);
 
-      if (op != OpCode::STORE) {
-        Operand arg2 = inst->getArg2();
-        tryReplaceUse(arg2);
-        inst->setArg2(arg2);
+    if (op == OpCode::LOAD) {
+      Operand base = inst->getArg1();
+      if (base.getType() == OperandType::Variable) {
+        int id = base.asSymbol()->id;
+        if (_allocas.count(id)) {
+          Operand val = _varStacks[id].empty() ? Operand::ConstantInt(0)
+                                               : _varStacks[id].top();
+          inst->setOp(OpCode::ASSIGN);
+          inst->setArg1(val);
+          inst->setArg2(Operand());
+          op = OpCode::ASSIGN;
+        }
       }
     }
+    // handle uses
     if (op == OpCode::ASSIGN) {
+      Operand src = inst->getArg1();
+      replaceUse(src);
+      inst->setArg1(src);
+    } else if (op == OpCode::STORE) {
+      Operand val = inst->getArg1();
+      replaceUse(val);
+      inst->setArg1(val);
+
+      Operand idx = inst->getResult();
+      replaceUse(idx);
+      inst->setResult(idx);
+    } else {
+      Operand arg1 = inst->getArg1();
+      replaceUse(arg1);
+      inst->setArg1(arg1);
+
+      Operand arg2 = inst->getArg2();
+      replaceUse(arg2);
+      inst->setArg2(arg2);
+
+      if (op == OpCode::RETURN) {
+        Operand res = inst->getResult();
+        replaceUse(res);
+        inst->setResult(res);
+      }
+    }
+    // handle definitions
+    if (op == OpCode::ASSIGN) {
+      // ASSIGN src, -, dst
       Operand dst = inst->getResult();
       if (dst.getType() == OperandType::Variable) {
         int id = dst.asSymbol()->id;
         if (_allocas.count(id)) {
-          Operand newVal = inst->getArg1();
-          _varStacks[id].push(newVal);
-          pushCount[id]++;
+          Operand src = inst->getArg1();
 
-          inst->setOp(OpCode::ALLOCA);
-          inst->setArg1(Operand());
+          bool needFreeze = false;
+          if (src.getType() == OperandType::Variable) {
+            if (!_allocas.count(src.asSymbol()->id)) {
+              needFreeze = true;
+            }
+          }
+          if (needFreeze) {
+            Operand temp = Operand::Temporary(F.allocateTemp());
+            inst->setResult(temp);
+            _varStacks[id].push(temp);
+            pushCount[id]++;
+          } else {
+            _varStacks[id].push(src);
+            pushCount[id]++;
+            inst->setOp(OpCode::NOP);
+          }
         }
       }
     } else if (op == OpCode::STORE) {
       Operand base = inst->getArg2();
-      Operand idx = inst->getResult();
-      bool isScalarStore = (idx.getType() == OperandType::Empty);
-      if (base.getType() == OperandType::Variable && isScalarStore) {
+      Operand index = inst->getResult();
+      bool isScalar =
+          index.getType() == OperandType::Empty ||
+          (index.getType() == OperandType::ConstantInt && index.asInt() == 0);
+      if (base.getType() == OperandType::Variable && isScalar) {
         int id = base.asSymbol()->id;
         if (_allocas.count(id)) {
-          Operand newVal = inst->getArg1();
-          _varStacks[id].push(newVal);
+          _varStacks[id].push(inst->getArg1());
           pushCount[id]++;
-
-          inst->setOp(OpCode::ALLOCA);
-          inst->setArg1(Operand());
+          inst->setOp(OpCode::NOP);
+        }
+      }
+    } else {
+      Operand dst = inst->getResult();
+      if (dst.getType() == OperandType::Variable) {
+        int id = dst.asSymbol()->id;
+        if (_allocas.count(id)) {
+          Operand newTemp = Operand::Temporary(F.allocateTemp());
+          inst->setResult(newTemp);
+          _varStacks[id].push(newTemp);
+          pushCount[id]++;
         }
       }
     }
@@ -226,22 +310,20 @@ void Mem2RegPass::renameVariables(BasicBlock *bb, DominatorTree &DT) {
 
   // fill phi arguments in successor blocks
   std::vector<BasicBlock *> successors;
-  if (bb->next)
-    successors.push_back(bb->next.get());
-  if (bb->jumpTarget)
+  if (bb->jumpTarget) {
     successors.push_back(bb->jumpTarget.get());
+  }
+  if (bb->next) {
+    successors.push_back(bb->next.get());
+  }
 
   for (BasicBlock *succ : successors) {
     for (auto &inst : succ->getInstructions()) {
       if (inst->getOp() == OpCode::PHI) {
         if (_phiToVarId.count(inst.get())) {
           int varId = _phiToVarId[inst.get()];
-          Operand val;
-          if (!_varStacks[varId].empty()) {
-            val = _varStacks[varId].top();
-          } else {
-            val = Operand::ConstantInt(0);
-          }
+          Operand val = _varStacks[varId].empty() ? Operand::ConstantInt(0)
+                                                  : _varStacks[varId].top();
           inst->addPhiArg(val, bb);
         }
       }
@@ -250,51 +332,11 @@ void Mem2RegPass::renameVariables(BasicBlock *bb, DominatorTree &DT) {
 
   const auto &children = DT.getDominatedBlocks(bb);
   for (BasicBlock *child : children) {
-    renameVariables(child, DT);
+    renameVariables(child, DT, F);
   }
   for (auto const &[varId, count] : pushCount) {
     for (int i = 0; i < count; i++) {
       _varStacks[varId].pop();
-    }
-  }
-}
-
-void Mem2RegPass::eliminatePhis(Function &F) {
-  for (auto &bb : F.getBlocks()) {
-    auto &insts = bb->getInstructions();
-    // collect all the phi nodes
-    std::vector<std::unique_ptr<Instruction>> phiNodes;
-    for (auto it = insts.begin(); it != insts.end();) {
-      if ((*it)->getOp() == OpCode::PHI) {
-        phiNodes.push_back(std::move(*it));
-        it = insts.erase(it);
-      } else {
-        break;
-      }
-    }
-
-    for (auto &phi : phiNodes) {
-      Operand dest = phi->getResult();
-      const auto &args = phi->getPhiArgs();
-      for (auto &pair : args) {
-        Operand src = pair.first;
-        BasicBlock *pred = pair.second;
-        auto copy =
-            std::make_unique<Instruction>(Instruction::MakeAssign(src, dest));
-        // insert into the end of the predecessor block
-        auto &pInsts = pred->getInstructions();
-        auto insertIt = pInsts.end();
-
-        if (!pInsts.empty()) {
-          OpCode lastOp = pInsts.back()->getOp();
-
-          if (lastOp == OpCode::GOTO || lastOp == OpCode::IF ||
-              lastOp == OpCode::RETURN) {
-            insertIt--;
-          }
-        }
-        pInsts.insert(insertIt, std::move(copy));
-      }
     }
   }
 }

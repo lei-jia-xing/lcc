@@ -25,8 +25,8 @@ private:
   void buildInterferenceGraph(Function *func);
   void doColoring();
 
-  // $s0-$s7, $t0-t5
-  static const int NumRegs = 14;
+  // $s0-$s7
+  static const int NumRegs = 8;
 
   std::map<const BasicBlock *, LiveSet> _use;
   std::map<const BasicBlock *, LiveSet> _def;

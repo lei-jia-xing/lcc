@@ -28,8 +28,7 @@ private:
   void collectPromotableAllocas(Function &F);
   void computeDominanceFrontiers(Function &F, DominatorTree &DT);
   void insertPhiNodes(Function &F);
-  void renameVariables(BasicBlock *BB, DominatorTree &DT);
-  void eliminatePhis(Function &F);
+  void renameVariables(BasicBlock *BB, DominatorTree &DT, Function &F);
 
   std::map<int, AllocaInfo> _allocas;
   std::map<BasicBlock *, std::set<BasicBlock *>> _domFrontiers;

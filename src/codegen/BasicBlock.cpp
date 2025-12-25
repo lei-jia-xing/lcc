@@ -10,7 +10,8 @@ std::vector<std::unique_ptr<Instruction>> &BasicBlock::getInstructions() {
   return _instructions;
 }
 
-const std::vector<std::unique_ptr<Instruction>> &BasicBlock::getInstructions() const {
+const std::vector<std::unique_ptr<Instruction>> &
+BasicBlock::getInstructions() const {
   return _instructions;
 }
 

@@ -699,6 +699,7 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
     return;
   }
   std::vector<int> arrayVals;
+  bool allConst = true;
   // array
   for (size_t i = 0; i < init->arrayExps.size(); ++i) {
     auto &ce = init->arrayExps[i];
@@ -707,11 +708,14 @@ void CodeGen::genConstInitVal(ConstInitVal *init,
       arrayVals.push_back(v.asInt());
     } else {
       arrayVals.push_back(0);
+      allConst = false;
     }
     emit(std::make_unique<Instruction>(
         Instruction::MakeStore(v, var, Operand::ConstantInt(i))));
   }
-  constArrayValues_[sym] = std::move(arrayVals);
+  if (allConst) {
+    constArrayValues_[sym] = std::move(arrayVals);
+  }
 }
 
 void CodeGen::genInitVal(InitVal *init, const std::shared_ptr<Symbol> &sym) {
