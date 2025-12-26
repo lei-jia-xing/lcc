@@ -158,3 +158,12 @@ void Function::buildCFG() {
 int Function::allocateTemp() { return _nextTempId++; }
 int Function::getTempCount() const { return _nextTempId; }
 int Function::allocateLabel() { return _nextLabelId++; }
+
+std::shared_ptr<BasicBlock> Function::getBlockSharedPtr(BasicBlock *rawPtr) {
+  for (const auto &blk : _blocks) {
+    if (blk.get() == rawPtr) {
+      return blk;
+    }
+  }
+  return nullptr;
+}

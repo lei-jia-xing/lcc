@@ -58,6 +58,8 @@ public:
    */
   int allocateLabel();
 
+  std::shared_ptr<BasicBlock> getBlockSharedPtr(BasicBlock *rawPtr);
+
   /**
    * @brief debug function to dump CFG to stderr
    *

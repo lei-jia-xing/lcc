@@ -52,6 +52,8 @@ void LoopAnalysis::run(Function &F, DominatorTree &DT) {
     rawBlocks.push_back(b_ptr.get());
   }
 
+  // Map Header -> Index in _loops
+  std::map<BasicBlock *, size_t> headerToLoopIndex;
   // Find back edges and identify natural loops
   for (BasicBlock *currentBlock : rawBlocks) {
     std::vector<BasicBlock *> successors = getSuccessors(currentBlock);
@@ -59,21 +61,34 @@ void LoopAnalysis::run(Function &F, DominatorTree &DT) {
       // An edge (currentBlock -> successor) is a back edge if successor
       // dominates currentBlock
       if (DT.dominates(successor, currentBlock)) {
-        // Found a back edge, 'successor' is the loop header
-        LoopInfo newLoop(successor);
-        findLoopBlocks(successor, currentBlock, DT, F, newLoop.blocks);
+        BasicBlock *header = successor;
 
-        // Populate exit blocks
-        for (BasicBlock *loopBb : newLoop.blocks) {
-          std::vector<BasicBlock *> loopBbSuccessors = getSuccessors(loopBb);
-          for (BasicBlock *succ : loopBbSuccessors) {
-            if (!newLoop.contains(succ)) { // If successor is not in the loop,
-                                           // it's an exit block
-              newLoop.exitBlocks.insert(succ);
-            }
-          }
+        std::set<BasicBlock *> currentLoopBlocks;
+        findLoopBlocks(header, currentBlock, DT, F, currentLoopBlocks);
+        if (headerToLoopIndex.count(header)) {
+          // multiple back edges to the same header, merge loops
+          size_t idx = headerToLoopIndex[header];
+          _loops[idx].blocks.insert(currentLoopBlocks.begin(),
+                                    currentLoopBlocks.end());
+        } else {
+          LoopInfo newLoop(header);
+          newLoop.blocks = currentLoopBlocks;
+          headerToLoopIndex[header] = _loops.size();
+          _loops.push_back(newLoop);
         }
-        _loops.push_back(newLoop);
+      }
+    }
+  }
+
+  for (auto &loop : _loops) {
+    loop.exitBlocks.clear();
+    for (BasicBlock *loopBb : loop.blocks) {
+      std::vector<BasicBlock *> loopBbSuccessors = getSuccessors(loopBb);
+      for (BasicBlock *succ : loopBbSuccessors) {
+        if (loop.blocks.find(succ) == loop.blocks.end()) {
+          // successor is outside the loop
+          loop.exitBlocks.insert(succ);
+        }
       }
     }
   }

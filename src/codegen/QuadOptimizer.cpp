@@ -503,13 +503,13 @@ void runDefaultQuadOptimizations(Function &fn) {
 
   Mem2RegPass mem2reg;
   mem2reg.run(fn, dt);
-  // LoopAnalysis la;
-  // la.run(fn, dt);
-  // if (!la.getLoops().empty()) {
-  //   LICMPass licm;
-  //   std::vector<LoopInfo> loops = la.getLoops();
-  //   licm.run(fn, dt, loops);
-  // }
+  LoopAnalysis la;
+  la.run(fn, dt);
+  if (!la.getLoops().empty()) {
+    LICMPass licm;
+    std::vector<LoopInfo> loops = la.getLoops();
+    licm.run(fn, dt, loops);
+  }
 
   // Run local optimizations
   // PassManager pm;

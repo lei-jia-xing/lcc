@@ -23,62 +23,13 @@ public:
   void run(Function &F, DominatorTree &DT, std::vector<LoopInfo> &loops);
 
 private:
-  /**
-   * @brief helper function to determine if an operand is loop-invariant.
-   *
-   * @param op Operand
-   * @param loopBlocks set of blocks in the loop
-   * @param operandDefs
-   * @param invariantInstructions instructions already identified
-   * as invariant
-   * @return isOperandLoopInvariant?
-   */
-  bool isOperandLoopInvariant(
-      const Operand &op, const std::set<BasicBlock *> &loopBlocks,
-      const std::map<Operand *, BasicBlock *> &operandDefs,
-      const std::set<const Instruction *> &invariantInstructions);
-
-  /**
-   * @brief helper function to determine if an instruction is loop-invariant.
-   *
-   * @param inst instruction to check
-   * @param loopBlocks set of blocks in the loop
-   * @param operandDefs operand definitions map
-   * @param invariantInstructions
-   * @return isInstructionLoopInvariant?
-   */
-  bool isInstructionLoopInvariant(
-      const Instruction &inst, const std::set<BasicBlock *> &loopBlocks,
-      const std::map<Operand *, BasicBlock *> &operandDefs,
-      const std::set<const Instruction *> &invariantInstructions);
-
-  /**
-   * @brief helper to check if an instruction is safely moved out of the loop.
-   *
-   * @param inst instruction to check
-   * @param currentBlock current block
-   * @param preheader
-   * @param DT DominatorTree
-   * @param loopBlocks set of blocks in the loop
-   * @param operandDefs Operand definitions map
-   * @return isSafeToMove?
-   */
-  bool isSafeToMove(const Instruction &inst, BasicBlock *currentBlock,
-                    BasicBlock *preheader, const DominatorTree &DT,
-                    const std::set<BasicBlock *> &loopBlocks,
-                    const std::map<Operand *, BasicBlock *> &operandDefs);
-
-  /**
-   * @brief maps temp id to the basic block where it is defined.
-   */
-  std::map<int, BasicBlock *> _tempDefinitions;
-  /**
-   * @brief maps Symbol to the basic block where it is defined.
-   */
-  std::map<std::shared_ptr<Symbol>, BasicBlock *> _varDefinitions;
-
-  /**
-   * @brief instructions identified as loop-invariant
-   */
-  std::set<const Instruction *> _identifiedInvariantInstructions;
+  struct DefInfo {
+    Instruction *inst;
+    BasicBlock *block;
+  };
+  bool isLoopInvariant(const Instruction *inst, const LoopInfo &loop,
+                       const std::map<int, DefInfo> &defMap,
+                       const std::set<const Instruction *> &invariants,
+                       const std::set<int> &modifiedVars, bool hasCall);
+  BasicBlock *getOrCreatePreheader(LoopInfo &loop, Function &F);
 };

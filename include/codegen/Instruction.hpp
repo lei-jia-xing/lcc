@@ -86,11 +86,15 @@ public:
   void setArg2(const Operand &v) { _arg2 = v; }
   void setResult(const Operand &v) { _result = v; }
 
+  BasicBlock *getParent() const { return _parent; }
+  void setParent(BasicBlock *bb) { _parent = bb; }
+
 private:
   OpCode _op;
   Operand _arg1;
   Operand _arg2;
   Operand _result;
 
+  BasicBlock *_parent = nullptr;
   std::vector<std::pair<Operand, BasicBlock *>> _phiArgs;
 };
