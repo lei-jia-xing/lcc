@@ -1,6 +1,7 @@
 #pragma once
 
 #include "codegen/Function.hpp"
+#include "optimize/DominatorTree.hpp"
 #include <memory>
 #include <vector>
 
@@ -15,14 +16,17 @@ public:
   void add(std::unique_ptr<QuadPass> pass) {
     passes.emplace_back(std::move(pass));
   }
-  void run(Function &fn) {
+  bool run(Function &fn) {
     bool changed = true;
-    while (changed) {
+    int round = 3;
+    while (changed && round > 0) {
       changed = false;
       for (auto &p : passes) {
         changed |= p->run(fn);
       }
+      round--;
     }
+    return changed;
   }
 
 private:
@@ -97,9 +101,11 @@ public:
  */
 class CSEPass : public QuadPass {
 public:
+  explicit CSEPass(DominatorTree &dt) : dt(dt) {}
   bool run(Function &fn) override;
 
 private:
+  DominatorTree &dt;
   struct ExpressionHash {
     size_t operator()(
         const std::pair<OpCode, std::pair<Operand, Operand>> &expr) const;

@@ -22,6 +22,7 @@ static bool hasSideEffect(OpCode op) {
   case OpCode::PARAM:
   case OpCode::ALLOCA:
   case OpCode::ARG:
+  case OpCode::PHI:
     return true;
   default:
     return false;
@@ -49,7 +50,8 @@ bool LocalDCEPass::run(Function &fn) {
         addUse(inst->getArg1());
         addUse(inst->getArg2());
       }
-      if (op == OpCode::RETURN || op == OpCode::STORE || op == OpCode::ALLOCA) {
+      if (op == OpCode::RETURN || op == OpCode::STORE || op == OpCode::ALLOCA ||
+          op == OpCode::PARAM) {
         addUse(inst->getResult());
       }
     }
@@ -115,8 +117,9 @@ bool ConstPropPass::run(Function &fn) {
         // RETURN: result is the return value
         // STORE: result is the index
         // ALLOCA: result is the size
+        // PARAM: result is the variable
         if (op == OpCode::RETURN || op == OpCode::STORE ||
-            op == OpCode::ALLOCA) {
+            op == OpCode::ALLOCA || op == OpCode::PARAM) {
           Operand res = inst->getResult();
           if (tryReplace(res)) {
             inst->setResult(res);
@@ -125,19 +128,89 @@ bool ConstPropPass::run(Function &fn) {
         }
       }
 
-      // Track constant assignments: ASSIGN const -> temp
-      // then the temp will be evaluated as const as rvalue
-      if (op == OpCode::ASSIGN) {
-        const Operand &src = inst->getArg1();
-        const Operand &dst = inst->getResult();
-        if (dst.getType() == OperandType::Temporary) {
-          int tid = dst.asInt();
-          if (src.getType() == OperandType::ConstantInt) {
-            // Record this temp as having a constant value
-            constMap[tid] = src.asInt();
-          } else {
-            // temp is assigned a non-constant, invalidate
-            constMap.erase(tid);
+      // collect constant assignments
+      const Operand &arg1 = inst->getArg1();
+      const Operand &arg2 = inst->getArg2();
+      const Operand &res = inst->getResult();
+
+      if (res.getType() == OperandType::Temporary) {
+        int tid = res.asInt();
+        if (op == OpCode::ASSIGN &&
+            arg1.getType() == OperandType::ConstantInt) {
+          constMap[tid] = arg1.asInt();
+        } else if (arg1.getType() == OperandType::ConstantInt &&
+                   arg2.getType() == OperandType::ConstantInt) {
+          int v1 = arg1.asInt();
+          int v2 = arg2.asInt();
+          int val = 0;
+          bool folded = false;
+
+          switch (op) {
+          case OpCode::ADD:
+            val = v1 + v2;
+            folded = true;
+            break;
+          case OpCode::SUB:
+            val = v1 - v2;
+            folded = true;
+            break;
+          case OpCode::MUL:
+            val = v1 * v2;
+            folded = true;
+            break;
+          case OpCode::DIV:
+            if (v2 != 0) {
+              val = v1 / v2;
+              folded = true;
+            }
+            break;
+          case OpCode::MOD:
+            if (v2 != 0) {
+              val = v1 % v2;
+              folded = true;
+            }
+            break;
+          case OpCode::EQ:
+            val = (v1 == v2);
+            folded = true;
+            break;
+          case OpCode::NEQ:
+            val = (v1 != v2);
+            folded = true;
+            break;
+          case OpCode::LT:
+            val = (v1 < v2);
+            folded = true;
+            break;
+          case OpCode::LE:
+            val = (v1 <= v2);
+            folded = true;
+            break;
+          case OpCode::GT:
+            val = (v1 > v2);
+            folded = true;
+            break;
+          case OpCode::GE:
+            val = (v1 >= v2);
+            folded = true;
+            break;
+          case OpCode::AND:
+            val = (v1 && v2);
+            folded = true;
+            break;
+          case OpCode::OR:
+            val = (v1 || v2);
+            folded = true;
+            break;
+          default:
+            break;
+          }
+          if (folded) {
+            inst->setOp(OpCode::ASSIGN);
+            inst->setArg1(Operand::ConstantInt(val));
+            inst->setArg2(Operand());
+            constMap[tid] = val;
+            changed = true;
           }
         }
       }
@@ -236,12 +309,12 @@ bool AlgebraicSimplifyPass::run(Function &fn) {
 bool CopyPropPass::run(Function &fn) {
   bool changed = false;
   std::unordered_map<int, Operand> copyMap;
-  auto resolve = [&](const Operand &op) -> Operand {
+  std::function<Operand(const Operand &)> resolve =
+      [&](const Operand &op) -> Operand {
     if (op.getType() == OperandType::Temporary) {
-      int tid = op.asInt();
-      auto it = copyMap.find(tid);
+      auto it = copyMap.find(op.asInt());
       if (it != copyMap.end()) {
-        return it->second;
+        return resolve(it->second);
       }
     }
     return op;
@@ -277,25 +350,21 @@ bool CopyPropPass::run(Function &fn) {
           }
         }
       } else {
-        Operand arg1 = inst->getArg1();
-        Operand r1 = resolve(arg1);
-        if (!isSame(r1, arg1)) {
+        Operand r1 = resolve(inst->getArg1());
+        if (!isSame(r1, inst->getArg1())) {
           inst->setArg1(r1);
           changed = true;
         }
-        Operand arg2 = inst->getArg2();
-        Operand r2 = resolve(arg2);
-        if (!isSame(r2, arg2)) {
+        Operand r2 = resolve(inst->getArg2());
+        if (!isSame(r2, inst->getArg2())) {
           inst->setArg2(r2);
           changed = true;
         }
-
         if (op == OpCode::RETURN || op == OpCode::STORE ||
-            op == OpCode::ALLOCA) {
-          Operand res = inst->getResult();
-          Operand rRes = resolve(res);
-          if (!isSame(rRes, res)) {
-            inst->setResult(rRes);
+            op == OpCode::ALLOCA || op == OpCode::PARAM) {
+          Operand res = resolve(inst->getResult());
+          if (!isSame(res, inst->getResult())) {
+            inst->setResult(res);
             changed = true;
           }
         }
@@ -309,7 +378,7 @@ bool CopyPropPass::run(Function &fn) {
 
         if (dst.getType() == OperandType::Temporary) {
           if (src.getType() == OperandType::Temporary ||
-              src.getType() == OperandType::Variable) {
+              src.getType() == OperandType::ConstantInt) {
             copyMap[dst.asInt()] = resolve(src);
           }
         }
@@ -392,107 +461,152 @@ bool CSEPass::ExpressionEqual::operator()(
          operandsEqual(lhs.second.second, rhs.second.second);
 }
 
-bool CSEPass::run(Function &fn) {
-  bool changed = false;
+class ScopedExprMap {
+public:
+  using ExprKey = std::pair<OpCode, std::pair<Operand, Operand>>;
 
-  // Expression to available temporary mapping
-  // We use unordered_map with custom hash and equal functions for efficiency
-  using Expression = std::pair<OpCode, std::pair<Operand, Operand>>;
-  using ExpressionMap =
-      std::unordered_map<Expression, int, ExpressionHash, ExpressionEqual>;
-
-  for (auto &blk : fn.getBlocks()) {
-    ExpressionMap availableExpressions;
-    auto &instructions = blk->getInstructions();
-
-    // First pass: collect available expressions and identify redundant ones
-    std::vector<std::pair<size_t, int>>
-        replacements; // (instruction_index, temp_to_use)
-
-    for (size_t i = 0; i < instructions.size(); i++) {
-      auto &inst = instructions[i];
-      if (!inst)
-        continue;
-
-      OpCode op = inst->getOp();
-
-      // Check if this is a computable expression
-      if (op == OpCode::ADD || op == OpCode::SUB || op == OpCode::MUL ||
-          op == OpCode::DIV || op == OpCode::MOD || op == OpCode::AND ||
-          op == OpCode::OR || op == OpCode::LT || op == OpCode::LE ||
-          op == OpCode::GT || op == OpCode::GE || op == OpCode::EQ ||
-          op == OpCode::NEQ) {
-
-        Expression expr = {op, {inst->getArg1(), inst->getArg2()}};
-
-        auto it = availableExpressions.find(expr);
-        if (it != availableExpressions.end()) {
-          // Found a common subexpression - record replacement
-          replacements.push_back({i, it->second});
-          changed = true;
-        } else {
-          // New expression - make it available for future use
-          const Operand &result = inst->getResult();
-          if (result.getType() == OperandType::Temporary) {
-            availableExpressions[expr] = result.asInt();
-          }
+  struct Hash {
+    size_t operator()(const ExprKey &k) const {
+      size_t h1 = std::hash<int>{}(static_cast<int>(k.first));
+      auto hashOp = [](const Operand &op) -> size_t {
+        size_t h = std::hash<int>{}(static_cast<int>(op.getType()));
+        switch (op.getType()) {
+        case OperandType::Temporary:
+        case OperandType::ConstantInt:
+          h ^= std::hash<size_t>{}(op.asInt() << 1);
+          break;
+        case OperandType::Variable:
+          h ^= (std::hash<void *>{}(op.asSymbol().get()) << 1);
+          break;
+        default:
+          break;
         }
-      }
+        return h;
+      };
+      size_t h2 = hashOp(k.second.first);
+      size_t h3 = hashOp(k.second.second);
+      bool commutative = (k.first == OpCode::ADD || k.first == OpCode::MUL ||
+                          k.first == OpCode::EQ || k.first == OpCode::NEQ ||
+                          k.first == OpCode::AND || k.first == OpCode::OR);
+      if (commutative && h2 > h3)
+        std::swap(h2, h3);
+      return h1 ^ (h2 << 1) ^ (h3 << 2);
+    }
+  };
 
-      // Invalidate expressions that use the result of this instruction
-      const Operand &result = inst->getResult();
-      if (result.getType() == OperandType::Temporary ||
-          result.getType() == OperandType::Variable) {
-        // Remove expressions that use this operand
-        for (auto it = availableExpressions.begin();
-             it != availableExpressions.end();) {
-          bool usesResult = false;
+  struct Equal {
+    bool operator()(const ExprKey &lhs, const ExprKey &rhs) const {
+      if (lhs.first != rhs.first)
+        return false;
 
-          auto operandUses = [&](const Operand &op) {
-            if (op.getType() == OperandType::Temporary &&
-                result.getType() == OperandType::Temporary) {
-              return op.asInt() == result.asInt();
-            }
-            if (op.getType() == OperandType::Variable &&
-                result.getType() == OperandType::Variable) {
-              return op.asSymbol() == result.asSymbol();
-            }
-            return false;
-          };
+      const Operand &l1 = lhs.second.first;
+      const Operand &l2 = lhs.second.second;
+      const Operand &r1 = rhs.second.first;
+      const Operand &r2 = rhs.second.second;
 
-          Expression expr = it->first;
-          if (operandUses(expr.second.first) ||
-              operandUses(expr.second.second)) {
-            usesResult = true;
-          }
+      bool commutative =
+          (lhs.first == OpCode::ADD || lhs.first == OpCode::MUL ||
+           lhs.first == OpCode::EQ || lhs.first == OpCode::NEQ ||
+           lhs.first == OpCode::AND || lhs.first == OpCode::OR);
 
-          if (usesResult) {
-            it = availableExpressions.erase(it);
-          } else {
-            ++it;
-          }
-        }
+      if (commutative) {
+        return (l1 == r1 && l2 == r2) || (l1 == r2 && l2 == r1);
+      } else {
+        return l1 == r1 && l2 == r2;
       }
     }
+  };
 
-    // Second pass: apply replacements (in reverse order to maintain indices)
-    for (auto it = replacements.rbegin(); it != replacements.rend(); ++it) {
-      size_t idx = it->first;
-      int replacementTemp = it->second;
+  void enterScope() { scopeStack.push_back(history.size()); }
+  void exitScope() {
+    size_t limit = scopeStack.back();
+    scopeStack.pop_back();
+    while (history.size() > limit) {
+      auto &kv = history.back();
+      map.erase(kv.first);
+      history.pop_back();
+    }
+  }
+  void insert(ExprKey k, int temp) {
+    if (map.find(k) == map.end()) {
+      map[k] = temp;
+      history.push_back({k, temp});
+    }
+  }
+  int lookup(ExprKey k) {
+    auto it = map.find(k);
+    return it != map.end() ? it->second : -1;
+  }
 
-      if (idx < instructions.size()) {
-        auto &inst = instructions[idx];
-        if (inst) {
-          // Replace the computation with a simple assignment
-          Operand result = inst->getResult();
-          inst = std::make_unique<Instruction>(
-              OpCode::ASSIGN, Operand::Temporary(replacementTemp), Operand(),
-              result);
-        }
-      }
+private:
+  std::unordered_map<ExprKey, int, Hash, Equal> map;
+  std::vector<std::pair<ExprKey, int>> history;
+  std::vector<size_t> scopeStack;
+};
+
+bool CSEPass::run(Function &fn) {
+  if (fn.getBlocks().empty())
+    return false;
+
+  bool changed = false;
+  std::unordered_map<BasicBlock *, std::vector<BasicBlock *>> domChildren;
+  BasicBlock *root = fn.getBlocks().front().get();
+
+  for (auto &bb_ptr : fn.getBlocks()) {
+    BasicBlock *bb = bb_ptr.get();
+    if (bb == root)
+      continue;
+
+    BasicBlock *idom = dt.getImmediateDominator(bb);
+    if (idom) {
+      domChildren[idom].push_back(bb);
     }
   }
 
+  ScopedExprMap exprMap;
+  std::function<void(BasicBlock *)> visit = [&](BasicBlock *bb) {
+    exprMap.enterScope();
+
+    for (auto &inst : bb->getInstructions()) {
+      if (!inst)
+        continue;
+      OpCode op = inst->getOp();
+
+      if (op == OpCode::ADD || op == OpCode::SUB || op == OpCode::MUL ||
+          op == OpCode::DIV || op == OpCode::MOD || op == OpCode::EQ ||
+          op == OpCode::NEQ || op == OpCode::LT || op == OpCode::LE ||
+          op == OpCode::GT || op == OpCode::GE || op == OpCode::AND ||
+          op == OpCode::OR) {
+
+        if (inst->getArg1().getType() == OperandType::Variable ||
+            inst->getArg2().getType() == OperandType::Variable) {
+          continue;
+        }
+        std::pair<OpCode, std::pair<Operand, Operand>> key = {
+            op, {inst->getArg1(), inst->getArg2()}};
+        int existing = exprMap.lookup(key);
+
+        if (existing != -1) {
+          inst->setOp(OpCode::ASSIGN);
+          inst->setArg1(Operand::Temporary(existing));
+          inst->setArg2(Operand());
+          changed = true;
+        } else {
+          if (inst->getResult().getType() == OperandType::Temporary) {
+            exprMap.insert(key, inst->getResult().asInt());
+          }
+        }
+      }
+    }
+
+    for (BasicBlock *child : domChildren[bb]) {
+      visit(child);
+    }
+
+    exprMap.exitScope();
+  };
+
+  visit(root);
   return changed;
 }
 
@@ -503,23 +617,24 @@ void runDefaultQuadOptimizations(Function &fn) {
 
   Mem2RegPass mem2reg;
   mem2reg.run(fn, dt);
+  dt.run(fn);
   LoopAnalysis la;
   la.run(fn, dt);
   if (!la.getLoops().empty()) {
     LICMPass licm;
     std::vector<LoopInfo> loops = la.getLoops();
     licm.run(fn, dt, loops);
+    dt.run(fn);
   }
 
   // Run local optimizations
-  // PassManager pm;
-  // pm.add(std::make_unique<ConstPropPass>());
-  // pm.add(std::make_unique<CopyPropPass>());
-  // pm.add(std::make_unique<AlgebraicSimplifyPass>());
-  // pm.add(std::make_unique<CSEPass>()); // Add CSE pass
-  // pm.add(std::make_unique<LocalDCEPass>());
-  // pm.run(fn);
-
+  PassManager pm;
+  pm.add(std::make_unique<ConstPropPass>());
+  pm.add(std::make_unique<AlgebraicSimplifyPass>());
+  pm.add(std::make_unique<CSEPass>(dt));
+  pm.add(std::make_unique<CopyPropPass>());
+  pm.add(std::make_unique<LocalDCEPass>());
+  pm.run(fn);
   PhiEliminationPass phiElim;
   phiElim.run(fn);
 }
