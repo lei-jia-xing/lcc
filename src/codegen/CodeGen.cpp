@@ -319,8 +319,13 @@ void CodeGen::genFunction(FuncDef *funcDef) {
     for (auto &p : funcDef->params->params) {
       auto sym = p->symbol; // Use symbol from AST node
       if (sym) {
-        emit(std::make_unique<Instruction>(Instruction::MakeParam(
-            Operand::ConstantInt(idx), Operand::Variable(sym))));
+        Operand paramTemp = newTemp();
+        emit(std::make_unique<Instruction>(
+            Instruction::MakeParam(Operand::ConstantInt(idx), paramTemp)));
+        emit(std::make_unique<Instruction>(Instruction::MakeAlloca(
+            Operand::Variable(sym), Operand::ConstantInt(1))));
+        emit(std::make_unique<Instruction>(Instruction::MakeStore(
+            paramTemp, Operand::Variable(sym), Operand::Empty())));
       }
       idx++;
     }

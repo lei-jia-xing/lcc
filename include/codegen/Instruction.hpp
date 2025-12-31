@@ -27,15 +27,19 @@ enum class OpCode {
   ASSIGN, // ASSIGN src(var|temp|const), -, dst(var|temp)
 
   LOAD,  // LOAD base(var|temp), index(var|temp|const), dst(var|temp)
-  STORE, // STORE value(var|temp|const), base(var|temp), index(var|temp|const)
+  STORE, // STORE value(var|temp|const), base(var|temp),
+         // index(var|temp|const|empty)
+  // NOTE:
+  // when the index is empty, it means storing to the address in base directly
 
   IF,    // IF cond(var|temp|const), -, res(label)
   GOTO,  // GOTO -, -, res(label)
   LABEL, // label -, -, res(label)
 
-  PARAM,  // PARAM idx(const), -, var(var)          function def
+  PARAM,  // PARAM idx(const), -, var(temp)
+          // function def
   ARG,    // ARG arg(var|const|temp), -, -          function call
-  CALL,   // CALL argc(const), func(label), res(temp)
+  CALL,   // CALL argc(const), func(variable), res(temp)
   RETURN, // RETURN -, -, res(var|temp|const)
 
   ALLOCA, // ALLOCA var(var), -, size(var|temp|const)

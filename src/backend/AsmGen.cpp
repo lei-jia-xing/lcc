@@ -18,6 +18,7 @@ static int log2IfPowerOf2(int n) {
   return exp;
 }
 
+static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
 AsmGen::AsmGen() {
   static const char *Regs[NUM_ALLOCATABLE_REGS] = {"$s0", "$s1", "$s2", "$s3",
                                                    "$s4", "$s5", "$s6", "$s7"};
@@ -289,7 +290,6 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   }
   out << "  move $fp, $sp\n";
 
-  static const char *aregs[4] = {"$a0", "$a1", "$a2", "$a3"};
   size_t fsz = formalParamByIndex_.size();
   for (size_t i = 0; i < fsz && i < 4; ++i) {
     const Symbol *sym = formalParamByIndex_[i];
@@ -701,8 +701,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto lit = locals_.find(baseSym);
       baseReg = allocateScratch();
       if (lit != locals_.end()) {
-        bool isArray =
-            baseSym->type && baseSym->type->category == Type::Category::Array;
+        int offset = lit->second.offset;
         bool isParam = false;
         for (auto &p : formalParamByIndex_) {
           if (p == baseSym) {
@@ -710,16 +709,21 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
             break;
           }
         }
-        if (isArray && !isParam) {
-          int offset = lit->second.offset;
+        if (isParam && !isEmpty(a2)) {
+          if (offset >= -32768 && offset <= 32767) {
+            out << "  lw " << baseReg << ", " << offset << "($fp)\n";
+          } else {
+            out << "  li " << baseReg << ", " << offset << "\n";
+            out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
+            out << "  lw " << baseReg << ", 0(" << baseReg << ")\n";
+          }
+        } else {
           if (offset >= -32768 && offset <= 32767) {
             out << "  addiu " << baseReg << ", $fp, " << offset << "\n";
           } else {
             out << "  li " << baseReg << ", " << offset << "\n";
             out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
           }
-        } else {
-          out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
       } else {
         // global varibale
@@ -781,8 +785,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       auto lit = locals_.find(baseSym);
       baseReg = allocateScratch();
       if (lit != locals_.end()) {
-        bool isArray =
-            baseSym->type && baseSym->type->category == Type::Category::Array;
+        int offset = lit->second.offset;
         bool isParam = false;
         for (auto &p : formalParamByIndex_) {
           if (p == baseSym) {
@@ -790,16 +793,21 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
             break;
           }
         }
-        if (isArray && !isParam) {
-          int offset = lit->second.offset;
+        if (isParam && !isEmpty(res)) {
+          if (offset >= -32768 && offset <= 32767) {
+            out << "  lw " << baseReg << ", " << offset << "($fp)\n";
+          } else {
+            out << "  li " << baseReg << ", " << offset << "\n";
+            out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
+            out << "  lw " << baseReg << ", 0(" << baseReg << ")\n";
+          }
+        } else {
           if (offset >= -32768 && offset <= 32767) {
             out << "  addiu " << baseReg << ", $fp, " << offset << "\n";
           } else {
             out << "  li " << baseReg << ", " << offset << "\n";
             out << "  addu " << baseReg << ", $fp, " << baseReg << "\n";
           }
-        } else {
-          out << "  lw " << baseReg << ", " << lit->second.offset << "($fp)\n";
         }
       } else {
         // global variable
@@ -873,7 +881,30 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     break;
   }
   case OpCode::PARAM: {
-    // The parameter handling is done in analyzeFunctionLocals
+    // PARAM index(const), result(temp)
+    // here is temp
+    Operand idxOp = inst->getArg1();
+    Operand resOp = inst->getResult();
+    if (isTemp(res)) {
+      int idx = idxOp.asInt();
+      std::string dstReg = getResultReg(res);
+      if (idx < 4) {
+        out << "  move " << dstReg << ", " << aregs[idx] << "\n";
+      } else {
+        // come back to caller's frame
+        int offset = frameSize_ + (idx - 4) * 4;
+        if (offset >= -32768 && offset <= 32767) {
+          out << "  lw " << dstReg << ", " << offset << "($fp)\n";
+        } else {
+          std::string addr = allocateScratch();
+          out << "  li " << addr << ", " << offset << "\n";
+          out << "  addu " << addr << ", $fp, " << addr << "\n";
+          out << "  lw " << dstReg << ", 0(" << addr << ")\n";
+          releaseScratch(addr);
+        }
+      }
+      storeToSpill(resOp.asInt(), dstReg);
+    }
     break;
   }
   case OpCode::CALL: {
@@ -1126,31 +1157,17 @@ void AsmGen::resetFunctionState() {
 void AsmGen::analyzeFunctionLocals(const Function *func) {
   int nextOffset = 8; // start after saved $ra and $fp
   formalParamByIndex_.clear();
-  bool inEntryParamRun = true;
-  bool isFirstBlock = true;
+  // trace PARAM -> STORE
+  std::map<int, int> tempToParam;
   for (auto &blk : func->getBlocks()) {
     for (auto &inst : blk->getInstructions()) {
       auto op = inst->getOp();
-      if (op == OpCode::LABEL) {
-        continue;
-      }
-      if (isFirstBlock && op == OpCode::PARAM) {
-        const auto &a1 = inst->getArg1();
-        const auto &res = inst->getResult();
-        if (inEntryParamRun && a1.getType() == OperandType::ConstantInt &&
-            res.getType() == OperandType::Variable) {
-          int idx = a1.asInt();
-          if (idx >= 0) {
-            if (formalParamByIndex_.size() <= idx)
-              formalParamByIndex_.resize(idx + 1);
-            auto sym = res.asSymbol();
-            formalParamByIndex_[idx] = sym.get();
-            if (locals_.find(sym.get()) == locals_.end()) {
-              locals_[sym.get()] = {nextOffset, 1};
-              nextOffset += 4;
-            }
-          }
-          continue;
+      if (op == OpCode::PARAM) {
+        // record temp -> param index
+        if (inst->getResult().getType() == OperandType::Temporary) {
+          int tempId = inst->getResult().asInt();
+          int paramIdx = inst->getArg1().asInt();
+          tempToParam[tempId] = paramIdx;
         }
       }
       if (op == OpCode::ALLOCA) {
@@ -1167,12 +1184,29 @@ void AsmGen::analyzeFunctionLocals(const Function *func) {
             nextOffset += words * 4;
           }
         }
-        continue;
       }
-      if (isFirstBlock)
-        inEntryParamRun = false;
+
+      if (op == OpCode::STORE) {
+        const Operand &val = inst->getArg1();
+        const Operand &base = inst->getArg2();
+        const Operand &idx = inst->getResult();
+        // STORE paramTemp, variableSym
+        if (val.getType() == OperandType::Temporary &&
+            base.getType() == OperandType::Variable &&
+            idx.getType() == OperandType::Empty) {
+          auto it = tempToParam.find(val.asInt());
+          if (it != tempToParam.end()) {
+            int pIdx = it->second;
+            const Symbol *sym = base.asSymbol().get();
+
+            if (formalParamByIndex_.size() <= pIdx) {
+              formalParamByIndex_.resize(pIdx + 1, nullptr);
+            }
+            formalParamByIndex_[pIdx] = sym;
+          }
+        }
+      }
     }
-    isFirstBlock = false;
   }
   frameSize_ = nextOffset;
 }

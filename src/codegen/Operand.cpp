@@ -17,6 +17,7 @@ Operand Operand::ConstantInt(int v) {
   return Operand(OperandType::ConstantInt, v);
 }
 Operand Operand::Label(int id) { return Operand(OperandType::Label, id); }
+Operand Operand::Empty() { return Operand(); }
 Operand Operand::Variable(std::shared_ptr<Symbol> sym) { return Operand(sym); }
 
 const std::shared_ptr<Symbol> &Operand::asSymbol() const {

@@ -15,6 +15,7 @@ public:
   static Operand ConstantInt(int v);
   static Operand Label(int id);
   static Operand Variable(std::shared_ptr<Symbol> sym);
+  static Operand Empty();
 
   OperandType getType() const { return _type; }
   std::string toString() const;
