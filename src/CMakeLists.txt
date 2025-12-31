@@ -13,7 +13,8 @@ add_library(Codegen
     optimize/LoopAnalysis.cpp
     optimize/LICM.cpp
     optimize/Mem2Reg.cpp
-    optimize/PhiElimination.cpp)
+    optimize/PhiElimination.cpp
+    optimize/GlobalConstEval.cpp)
 
 add_library(Backend
     backend/AsmGen.cpp
