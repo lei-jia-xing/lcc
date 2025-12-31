@@ -17,14 +17,9 @@ public:
     passes.emplace_back(std::move(pass));
   }
   bool run(Function &fn) {
-    bool changed = true;
-    int round = 3;
-    while (changed && round > 0) {
-      changed = false;
-      for (auto &p : passes) {
-        changed |= p->run(fn);
-      }
-      round--;
+    bool changed = false;
+    for (auto &p : passes) {
+      changed |= p->run(fn);
     }
     return changed;
   }
@@ -117,4 +112,4 @@ private:
                const std::pair<OpCode, std::pair<Operand, Operand>> &rhs) const;
   };
 };
-void runDefaultQuadOptimizations(Function &fn);
+bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt);

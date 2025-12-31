@@ -4,8 +4,6 @@
 #include "optimize/DominatorTree.hpp"
 #include "optimize/LICM.hpp"
 #include "optimize/LoopAnalysis.hpp"
-#include "optimize/Mem2Reg.hpp"
-#include "optimize/PhiElimination.hpp"
 #include <functional>
 #include <set>
 #include <unordered_map>
@@ -610,31 +608,13 @@ bool CSEPass::run(Function &fn) {
   return changed;
 }
 
-void runDefaultQuadOptimizations(Function &fn) {
-  // build SSA
-  DominatorTree dt;
-  dt.run(fn);
-
-  Mem2RegPass mem2reg;
-  mem2reg.run(fn, dt);
-  dt.run(fn);
-  LoopAnalysis la;
-  la.run(fn, dt);
-  if (!la.getLoops().empty()) {
-    LICMPass licm;
-    std::vector<LoopInfo> loops = la.getLoops();
-    licm.run(fn, dt, loops);
-    dt.run(fn);
-  }
-
+bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt) {
   // Run local optimizations
   PassManager pm;
+  pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<ConstPropPass>());
   pm.add(std::make_unique<AlgebraicSimplifyPass>());
   pm.add(std::make_unique<CSEPass>(dt));
-  pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<LocalDCEPass>());
-  pm.run(fn);
-  PhiEliminationPass phiElim;
-  phiElim.run(fn);
+  return pm.run(fn);
 }

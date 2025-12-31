@@ -3,6 +3,10 @@
 #include "codegen/QuadOptimizer.hpp"
 #include "errorReporter/ErrorReporter.hpp"
 #include "lexer/Lexer.hpp"
+#include "optimize/DominatorTree.hpp"
+#include "optimize/GlobalConstEval.hpp"
+#include "optimize/Mem2Reg.hpp"
+#include "optimize/PhiElimination.hpp"
 #include "parser/Parser.hpp"
 #include "semantic/SemanticAnalyzer.hpp"
 #include <fstream>
@@ -10,6 +14,7 @@
 
 // Optimization switch: set to true to enable IR optimizations
 constexpr bool ENABLE_OPTIMIZATION = true;
+const int MAX_ROUND = 10;
 
 int main() {
   std::ofstream errorfile("error.txt");
@@ -55,8 +60,37 @@ int main() {
 
     // Apply IR optimizations if enabled
     if constexpr (ENABLE_OPTIMIZATION) {
-      for (const auto &fp : cg.getFunctions()) {
-        runDefaultQuadOptimizations(*fp);
+      auto &functions = cg.getFunctions();
+      // build SSA
+      for (auto &fp : functions) {
+        DominatorTree dt;
+        dt.run(*fp);
+        Mem2RegPass mem2reg;
+        mem2reg.run(*fp, dt);
+      }
+      bool changed = true;
+      int round = 0;
+      while (changed && round < MAX_ROUND) {
+        changed = false;
+        round++;
+        GlobalConstEvalPass globalEval(functions);
+        for (auto &fp : functions) {
+          if (globalEval.run(*fp)) {
+            changed = true;
+          }
+        }
+        for (auto &fp : functions) {
+          DominatorTree dt;
+          dt.run(*fp);
+          if (runDefaultQuadOptimizations(*fp, dt)) {
+            changed = true;
+          }
+        }
+      }
+      // phi elimination
+      for (auto &fp : functions) {
+        PhiEliminationPass phiElim;
+        phiElim.run(*fp);
       }
     }
 
