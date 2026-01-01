@@ -217,7 +217,7 @@ bool ConstPropPass::run(Function &fn) {
   return changed;
 }
 
-bool AlgebraicSimplifyPass::run(Function &fn) {
+bool AlgebraicPass::run(Function &fn) {
   bool changed = false;
 
   for (auto &blk : fn.getBlocks()) {
@@ -613,7 +613,7 @@ bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt) {
   PassManager pm;
   pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<ConstPropPass>());
-  pm.add(std::make_unique<AlgebraicSimplifyPass>());
+  pm.add(std::make_unique<AlgebraicPass>());
   pm.add(std::make_unique<CSEPass>(dt));
   pm.add(std::make_unique<LocalDCEPass>());
   return pm.run(fn);

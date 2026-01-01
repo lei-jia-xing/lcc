@@ -67,7 +67,7 @@ public:
  * x % 1 -> 0, only int
  *
  */
-class AlgebraicSimplifyPass : public QuadPass {
+class AlgebraicPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
