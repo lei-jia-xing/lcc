@@ -18,7 +18,7 @@ static std::vector<BasicBlock *> getPredecessors(BasicBlock *BB, Function &F) {
   return predecessors;
 }
 
-BasicBlock *LICMPass::getOrCreatePreheader(LoopInfo &loop, Function &F) {
+BasicBlock *LICMPass::getOrCreatePreheader(const LoopInfo &loop, Function &F) {
   BasicBlock *header = loop.header;
 
   int headerLabelId = header->getLabelId();
@@ -65,6 +65,7 @@ BasicBlock *LICMPass::getOrCreatePreheader(LoopInfo &loop, Function &F) {
       Instruction::MakeGoto(Operand::Label(header->getLabelId()))));
   preheader->jumpTarget = F.getBlockSharedPtr(header);
 
+  int targetLabelId = header->getLabelId();
   for (BasicBlock *pred : outsidePreds) {
     if (pred->jumpTarget.get() == header) {
       pred->jumpTarget = F.getBlockSharedPtr(preheader);
@@ -72,11 +73,14 @@ BasicBlock *LICMPass::getOrCreatePreheader(LoopInfo &loop, Function &F) {
       // modify jump target label
       Instruction *term = pred->getInstructions().back().get();
       if (term->getOp() == OpCode::GOTO || term->getOp() == OpCode::IF) {
-        if (term->getResult().getType() == OperandType::Label) {
+        if (term->getResult().getType() == OperandType::Label &&
+            term->getResult().asInt() == targetLabelId) {
           term->setResult(Operand::Label(preHeaderLabelId));
-        } else if (term->getArg1().getType() == OperandType::Label) {
+        } else if (term->getArg1().getType() == OperandType::Label &&
+                   term->getArg1().asInt() == targetLabelId) {
           term->setArg1(Operand::Label(preHeaderLabelId));
-        } else if (term->getArg2().getType() == OperandType::Label) {
+        } else if (term->getArg2().getType() == OperandType::Label &&
+                   term->getArg2().asInt() == targetLabelId) {
           term->setArg2(Operand::Label(preHeaderLabelId));
         }
       }
@@ -147,8 +151,8 @@ static bool isSafeToSpeculate(OpCode op) {
 bool LICMPass::isLoopInvariant(const Instruction *inst, const LoopInfo &loop,
                                const std::map<int, DefInfo> &defMap,
                                const std::set<const Instruction *> &invariants,
-                               const std::set<int> &modifiedVars,
-                               bool hasCall) {
+                               const std::set<int> &modifiedVars, bool hasCall,
+                               DominatorTree &DT) {
   OpCode op = inst->getOp();
   if (op == OpCode::STORE || op == OpCode::CALL || op == OpCode::RETURN ||
       op == OpCode::IF || op == OpCode::GOTO || op == OpCode::LABEL ||
@@ -181,11 +185,16 @@ bool LICMPass::isLoopInvariant(const Instruction *inst, const LoopInfo &loop,
     if (it == defMap.end())
       return true;
     BasicBlock *defBlock = it->second.block;
-    Instruction *defInst = it->second.inst;
-    if (loop.blocks.find(defBlock) == loop.blocks.end())
+    if (loop.blocks.count(defBlock)) {
+      if (invariants.count(it->second.inst)) {
+        return true;
+      }
+      return false;
+    }
+
+    if (DT.dominates(defBlock, loop.header)) {
       return true;
-    if (invariants.count(defInst))
-      return true;
+    }
     return false;
   };
 
@@ -197,7 +206,7 @@ bool LICMPass::isLoopInvariant(const Instruction *inst, const LoopInfo &loop,
   return true;
 }
 void LICMPass::run(Function &F, DominatorTree &DT,
-                   std::vector<LoopInfo> &loops) {
+                   const std::vector<LoopInfo> &loops) {
   if (loops.empty())
     return;
   std::map<int, DefInfo> defInfoMap;
@@ -216,7 +225,15 @@ void LICMPass::run(Function &F, DominatorTree &DT,
     if (!preheader) {
       continue;
     }
+    // CFG changes, update dom
+    DT.run(F);
 
+    for (auto &inst : preheader->getInstructions()) {
+      const Operand &res = inst->getResult();
+      if (res.getType() == OperandType::Temporary) {
+        defInfoMap[res.asInt()] = {inst.get(), preheader};
+      }
+    }
     std::set<int> modifiedVars;
     // flag for function call inside the loop
     bool hasCall = false;
@@ -252,7 +269,7 @@ void LICMPass::run(Function &F, DominatorTree &DT,
             continue;
 
           if (isLoopInvariant(inst, loop, defInfoMap, invariantInstructions,
-                              modifiedVars, hasCall)) {
+                              modifiedVars, hasCall, DT)) {
             invariantInstructions.insert(inst);
             orderedInvariants.push_back(inst);
             changed = true;

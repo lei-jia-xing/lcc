@@ -20,7 +20,7 @@ public:
    * @param DT Dominator tree of the function
    * @param loops loop information of the function
    */
-  void run(Function &F, DominatorTree &DT, std::vector<LoopInfo> &loops);
+  void run(Function &F, DominatorTree &DT, const std::vector<LoopInfo> &loops);
 
 private:
   struct DefInfo {
@@ -30,6 +30,7 @@ private:
   bool isLoopInvariant(const Instruction *inst, const LoopInfo &loop,
                        const std::map<int, DefInfo> &defMap,
                        const std::set<const Instruction *> &invariants,
-                       const std::set<int> &modifiedVars, bool hasCall);
-  BasicBlock *getOrCreatePreheader(LoopInfo &loop, Function &F);
+                       const std::set<int> &modifiedVars, bool hasCall,
+                       DominatorTree &DT);
+  BasicBlock *getOrCreatePreheader(const LoopInfo &loop, Function &F);
 };

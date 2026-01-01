@@ -23,8 +23,6 @@ struct LoopInfo {
   std::set<BasicBlock *> exitBlocks;
 
   LoopInfo(BasicBlock *h) : header(h) {}
-
-  bool contains(BasicBlock *bb) const { return blocks.count(bb) > 0; }
 };
 
 class LoopAnalysis {
