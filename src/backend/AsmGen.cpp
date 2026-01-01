@@ -4,8 +4,51 @@
 #include "codegen/Operand.hpp"
 #include "semantic/Symbol.hpp"
 #include "semantic/Type.hpp"
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
 
+struct MagicInfo {
+  int multiplier;
+  int shift;
+};
+
+static MagicInfo computeMagic(int d) {
+  if (d == 0 || d == 1 || d == -1)
+    return {1, 0};
+
+  unsigned int ad = std::abs(d);
+  unsigned long long t = 1ull << 31;
+  unsigned long long anc = t - 1 - (t % ad);
+  unsigned long long p = 31;
+  unsigned long long q1 = t / ad;
+  unsigned long long r1 = t % ad;
+  unsigned long long q2 = t / ad;
+  unsigned long long r2 = t % ad;
+  unsigned long long delta;
+
+  do {
+    p++;
+    q1 = 2 * q1;
+    r1 = 2 * r1;
+    if (r1 >= ad) {
+      q1++;
+      r1 -= ad;
+    }
+    q2 = 2 * q2;
+    r2 = 2 * r2;
+    if (r2 >= ad) {
+      q2++;
+      r2 -= ad;
+    }
+    delta = ad - 1 - r2;
+  } while (q1 < delta || (q1 == delta && r1 == 0));
+
+  MagicInfo info;
+  info.multiplier = (int)(q2 + 1);
+  info.shift = (int)(p - 32);
+  return info;
+}
 // Check if n is a power of 2 and return the exponent, or -1 if not
 static int log2IfPowerOf2(int n) {
   if (n <= 0)
@@ -243,7 +286,31 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
    */
   curFuncName_ = func->getName();
   resetFunctionState();
+
+  // detect leaf function
+  bool isLeaf = true;
+  for (auto &blk : func->getBlocks()) {
+    for (auto &inst : blk->getInstructions()) {
+      if (inst->getOp() == OpCode::CALL) {
+        isLeaf = false;
+        break;
+      }
+    }
+    if (!isLeaf)
+      break;
+  }
+  if (func->getName() == "main")
+    isLeaf = false;
+
   analyzeFunctionLocals(func);
+
+  // if leaf function, no need to save $ra
+  if (isLeaf) {
+    frameSize_ -= 4;
+    for (auto &kv : locals_) {
+      kv.second.offset -= 4;
+    }
+  }
 
   _regAllocator.run(const_cast<Function *>(func));
 
@@ -274,8 +341,12 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
   } else {
     out << "  addiu $sp, $sp, -" << frameSize_ << "\n";
   }
-  out << "  sw $ra, 0($sp)\n";
-  out << "  sw $fp, 4($sp)\n";
+  if (isLeaf) {
+    out << "  sw $fp, 0($sp)\n";
+  } else {
+    out << "  sw $ra, 0($sp)\n";
+    out << "  sw $fp, 4($sp)\n";
+  }
 
   for (size_t i = 0; i < calleeSavedRegs.size(); ++i) {
     int regId = calleeSavedRegs[i];
@@ -373,9 +444,13 @@ void AsmGen::emitFunction(const Function *func, std::ostream &out) {
       out << "  lw " << regs_[regId].name << ", 0($t6)\n";
     }
   }
-
-  out << "  lw $ra, 0($fp)\n";
-  out << "  lw $fp, 4($fp)\n";
+  // leaf function no need to resume $ra
+  if (isLeaf) {
+    out << "  lw $fp, 0($fp)\n";
+  } else {
+    out << "  lw $ra, 0($fp)\n";
+    out << "  lw $fp, 4($fp)\n";
+  }
   if (frameSize_ > 32767) {
     out << "  li $t6, " << frameSize_ << "\n";
     out << "  addu $sp, $sp, $t6\n";
@@ -533,27 +608,128 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
   }
   case OpCode::DIV: {
     // DIV arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
-    // NOTE:
-    // In present don't shift in division optimization,
-    // for example -5 / 2 -> -5 >> 1 = -3 which is Wrong
-    // it remians to be optimized in future if needed
+    // x / 2^k => (x + (x < 0 ? (2^k - 1) : 0)) >> k
     std::string rd = getResultReg(res);
-    std::string ra = getRegister(a1, out);
-    std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
-    out << "  div " << ra << ", " << rb << "\n";
-    out << "  mflo " << rd << "\n";
-    releaseScratch(ra);
-    if (a1 != a2) {
-      releaseScratch(rb);
+    bool optimized = false;
+
+    if (isConst(a2)) {
+      int d = a2.asInt();
+      int absD = std::abs(d);
+      int k = log2IfPowerOf2(absD);
+      if (d == 1) {
+        std::string ra = getRegister(a1, out);
+        out << "  move " << rd << ", " << ra << "\n";
+        releaseScratch(ra);
+        optimized = true;
+      } else if (d == -1) {
+        std::string ra = getRegister(a1, out);
+        out << "  subu " << rd << ", $zero, " << ra << "\n";
+        releaseScratch(ra);
+        optimized = true;
+      } else if (k >= 0) {
+        std::string ra = getRegister(a1, out);
+        std::string t = allocateScratch();
+
+        out << "  sra " << t << ", " << ra << ", 31\n";
+        out << "  srl " << t << ", " << t << ", " << (32 - k) << "\n";
+        out << "  addu " << t << ", " << ra << ", " << t << "\n";
+        out << "  sra " << rd << ", " << t << ", " << k << "\n";
+        if (d < 0) {
+          out << "  subu " << rd << ", $zero, " << rd << "\n";
+        }
+        releaseScratch(t);
+        releaseScratch(ra);
+        optimized = true;
+      } else {
+        MagicInfo mag = computeMagic(d);
+        std::string ra = getRegister(a1, out);
+        std::string regM = allocateScratch();
+
+        out << "  li " << regM << ", " << mag.multiplier << "\n";
+
+        out << "  mult " << ra << ", " << regM << "\n";
+        out << "  mfhi " << rd << "\n";
+
+        if (mag.shift > 0) {
+          out << "  sra " << rd << ", " << rd << ", " << mag.shift << "\n";
+        }
+        std::string sign = allocateScratch();
+        out << "  srl " << sign << ", " << ra << ", 31\n";
+        out << " addu " << rd << ", " << rd << ", " << sign << "\n";
+
+        if (d < 0) {
+          out << "  subu " << rd << ", $zero, " << rd << "\n";
+        }
+        releaseScratch(sign);
+        releaseScratch(regM);
+        releaseScratch(ra);
+        optimized = true;
+      }
+    }
+    if (!optimized) {
+      std::string ra = getRegister(a1, out);
+      std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
+      out << "  div " << ra << ", " << rb << "\n";
+      out << "  mflo " << rd << "\n";
+      releaseScratch(ra);
+      if (a1 != a2) {
+        releaseScratch(rb);
+      }
     }
     if (isTemp(res)) {
       storeToSpill(res.asInt(), rd);
     }
     break;
   }
-  case OpCode::ADD:
-  case OpCode::SUB:
   case OpCode::MOD: {
+    // MOD arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
+    // x % y => x - (x / y) * y
+    std::string rd = getResultReg(res);
+    bool optimized = false;
+    if (isConst(a2)) {
+      int d = a2.asInt();
+      int absD = std::abs(d);
+      int k = log2IfPowerOf2(absD);
+
+      if (k >= 0) {
+        std::string ra = getRegister(a1, out);
+        std::string divRes = allocateScratch();
+        std::string t = allocateScratch();
+        out << "  sra " << t << ", " << ra << ", 31\n";
+        out << "  srl " << t << ", " << t << ", " << (32 - k) << "\n";
+        out << "  addu " << t << ", " << ra << ", " << t << "\n";
+        out << "  sra " << divRes << ", " << t << ", " << k << "\n";
+        releaseScratch(t);
+
+        std::string mulRes = allocateScratch();
+        out << "  sll " << mulRes << ", " << divRes << ", " << k << "\n";
+        out << "  subu " << rd << ", " << ra << ", " << mulRes << "\n";
+
+        releaseScratch(mulRes);
+        releaseScratch(divRes);
+        releaseScratch(ra);
+        optimized = true;
+      }
+    }
+
+    if (!optimized) {
+      std::string ra = getRegister(a1, out);
+      std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
+      out << "  div " << ra << ", " << rb << "\n";
+      out << "  mfhi " << rd << "\n";
+      releaseScratch(ra);
+      if (a1 != a2) {
+        releaseScratch(rb);
+      }
+    }
+
+    if (isTemp(res)) {
+      storeToSpill(res.asInt(), rd);
+    }
+    break;
+  }
+  case OpCode::ADD:
+  case OpCode::SUB: {
     // op arg1(var|temp|const), arg2(var|temp|const), res(temp|const)
     std::string ra = getRegister(a1, out);
     std::string rb = (a1 == a2) ? ra : getRegister(a2, out);
@@ -565,10 +741,6 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       break;
     case OpCode::SUB:
       out << "  subu " << rd << ", " << ra << ", " << rb << "\n";
-      break;
-    case OpCode::MOD:
-      out << "  div " << ra << ", " << rb << "\n";
-      out << "  mfhi " << rd << "\n";
       break;
     default:
       break;

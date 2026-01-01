@@ -5,6 +5,8 @@
 #include "lexer/Lexer.hpp"
 #include "optimize/DominatorTree.hpp"
 #include "optimize/GlobalConstEval.hpp"
+#include "optimize/LICM.hpp"
+#include "optimize/LoopAnalysis.hpp"
 #include "optimize/Mem2Reg.hpp"
 #include "optimize/PhiElimination.hpp"
 #include "parser/Parser.hpp"
@@ -67,6 +69,18 @@ int main() {
         dt.run(*fp);
         Mem2RegPass mem2reg;
         mem2reg.run(*fp, dt);
+      }
+
+      for (auto &fp : functions) {
+        DominatorTree dt;
+        dt.run(*fp);
+        LoopAnalysis loopAnalysis;
+        loopAnalysis.run(*fp, dt);
+        auto &loops = loopAnalysis.getLoops();
+        if (!loops.empty()) {
+          LICMPass licm;
+          licm.run(*fp, dt, loops);
+        }
       }
       bool changed = true;
       int round = 0;
