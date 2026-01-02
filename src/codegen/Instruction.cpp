@@ -3,17 +3,19 @@
 
 Instruction::Instruction(OpCode op, Operand a1, Operand a2, Operand res)
     : _op(op), _arg1(std::move(a1)), _arg2(std::move(a2)),
-      _result(std::move(res)) {}
+      _result(std::move(res)), _parent(nullptr) {}
 
 Instruction::Instruction(OpCode op, Operand a1, Operand res)
-    : _op(op), _arg1(std::move(a1)), _arg2(Operand()), _result(std::move(res)) {
-}
+    : _op(op), _arg1(std::move(a1)), _arg2(Operand()), _result(std::move(res)),
+      _parent(nullptr) {}
 
 Instruction::Instruction(OpCode op, Operand res)
-    : _op(op), _arg1(Operand()), _arg2(Operand()), _result(std::move(res)) {}
+    : _op(op), _arg1(Operand()), _arg2(Operand()), _result(std::move(res)),
+      _parent(nullptr) {}
 
 Instruction::Instruction(OpCode op)
-    : _op(op), _arg1(Operand()), _arg2(Operand()), _result(Operand()) {}
+    : _op(op), _arg1(Operand()), _arg2(Operand()), _result(Operand()),
+      _parent(nullptr) {}
 
 static const char *opToStr(OpCode op) {
   switch (op) {
