@@ -7,6 +7,7 @@
 #include "optimize/GlobalConstEval.hpp"
 #include "optimize/LICM.hpp"
 #include "optimize/LoopAnalysis.hpp"
+#include "optimize/LoopUnroll.hpp"
 #include "optimize/Mem2Reg.hpp"
 #include "optimize/PhiElimination.hpp"
 #include "parser/Parser.hpp"
@@ -80,6 +81,8 @@ int main() {
         if (!loops.empty()) {
           LICMPass licm;
           licm.run(*fp, dt, loops);
+          LoopUnrollPass loopUnroll;
+          loopUnroll.run(*fp, loops);
         }
       }
       bool changed = true;

@@ -14,7 +14,9 @@ add_library(Codegen
     optimize/LICM.cpp
     optimize/Mem2Reg.cpp
     optimize/PhiElimination.cpp
-    optimize/GlobalConstEval.cpp)
+    optimize/GlobalConstEval.cpp
+    optimize/LoopUnroll.cpp
+    )
 
 add_library(Backend
     backend/AsmGen.cpp
