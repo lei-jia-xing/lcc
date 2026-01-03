@@ -1,7 +1,9 @@
 #include "optimize/GlobalConstEval.hpp"
 #include "codegen/BasicBlock.hpp"
 #include "codegen/Instruction.hpp"
+#include "codegen/Operand.hpp"
 #include <unordered_map>
+#include <unordered_set>
 
 Function *GlobalConstEvalPass::findFunction(const std::string &name) {
   for (const auto &fn : functions) {
@@ -74,6 +76,8 @@ std::pair<bool, int> GlobalConstEvalPass::evaluate(Function *fn,
 
   // memory search
   std::pair<std::string, std::vector<int>> cacheKey = {fn->getName(), args};
+  std::unordered_map<int, std::unordered_map<int, int>> memory;
+  std::unordered_set<int> localAllocas;
   auto cacheIt = evalCache.find(cacheKey);
   if (cacheIt != evalCache.end()) {
     return {true, cacheIt->second};
@@ -99,9 +103,17 @@ std::pair<bool, int> GlobalConstEvalPass::evaluate(Function *fn,
           env[dest.asInt()] = args[argIdx];
         } else if (dest.getType() == OperandType::Variable) {
           localVars[dest.asSymbol()->id] = args[argIdx];
+          memory[dest.asSymbol()->id][0] = args[argIdx];
         }
       }
       argIdx++;
+    }
+  }
+  for (auto &inst : currentBlock->getInstructions()) {
+    if (inst->getOp() == OpCode::ALLOCA) {
+      if (inst->getArg1().getType() == OperandType::Variable) {
+        localAllocas.insert(inst->getArg1().asSymbol()->id);
+      }
     }
   }
 
@@ -167,10 +179,21 @@ std::pair<bool, int> GlobalConstEvalPass::evaluate(Function *fn,
       };
       if (op == OpCode::LOAD) {
         Operand base = inst->getArg1();
-        Operand offset = inst->getArg2();
+        Operand index = inst->getArg2();
         if (base.getType() == OperandType::Variable) {
           int id = base.asSymbol()->id;
-          if (localVars.count(id) && offset.getType() == OperandType::Empty) {
+          int offset = 0;
+          if (index.getType() != OperandType::Empty) {
+            auto res = getVal(index);
+            if (!res.first)
+              return {false, 0};
+            offset = res.second;
+          }
+
+          if (memory.count(id) && memory[id].count(offset)) {
+            env[inst->getResult().asInt()] = memory[id][offset];
+            continue;
+          } else if (offset == 0 && localVars.count(id)) {
             env[inst->getResult().asInt()] = localVars[id];
             continue;
           }
@@ -180,15 +203,32 @@ std::pair<bool, int> GlobalConstEvalPass::evaluate(Function *fn,
       if (op == OpCode::STORE) {
         Operand val = inst->getArg1();
         Operand base = inst->getArg2();
-        Operand offset = inst->getResult();
+        Operand index = inst->getResult();
 
-        if (base.getType() == OperandType::Variable &&
-            offset.getType() == OperandType::Empty) {
-          auto res = getVal(val);
-          if (res.first) {
-            localVars[base.asSymbol()->id] = res.second;
-            continue;
+        if (base.getType() == OperandType::Variable) {
+          int baseId = base.asSymbol()->id;
+          bool isLocalAlloca = localAllocas.count(baseId);
+          bool isLocalScalar =
+              localVars.count(baseId) && index.getType() == OperandType::Empty;
+          // do not write to global variable & param array to avoid side effect
+          if (!isLocalAlloca && !isLocalScalar)
+            return {false, 0};
+
+          auto valRes = getVal(val);
+          if (!valRes.first)
+            return {false, 0};
+          int offset = 0;
+          if (index.getType() != OperandType::Empty) {
+            auto idxRes = getVal(index);
+            if (!idxRes.first)
+              return {false, 0};
+            offset = idxRes.second;
           }
+          memory[base.asSymbol()->id][offset] = valRes.second;
+          if (offset == 0) {
+            localVars[base.asSymbol()->id] = valRes.second;
+          }
+          continue;
         }
         return {false, 0};
       }
