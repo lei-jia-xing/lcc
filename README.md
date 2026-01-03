@@ -11,8 +11,8 @@ A simple compiler for a C-like language, built from scratch using C++17 and CMak
 This project is currently under development. The progress of each major component is tracked below:
 
 - **Frontend**
-  - [x] Lexical Analysis (Lexer)
-  - [x] Parsing (Parser)
+  - [x] Lexical Analysis
+  - [x] Parsing
   - [x] Abstract Syntax Tree (AST) Generation
   - [x] Semantic Analysis
   - [x] Intermediate Representation (IR) Generation

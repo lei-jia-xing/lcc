@@ -51,7 +51,6 @@ static LatticeVal mergeLattice(LatticeVal cur, LatticeVal incoming,
     return cur;
   }
 
-  // One constant and one overdefined, or different constants handled above
   changed |= cur.kind != LatticeVal::Kind::Overdefined;
   return {LatticeVal::Kind::Overdefined, 0};
 }
@@ -232,7 +231,6 @@ bool CFGSCCPPass::run(Function &fn) {
         }
       }
 
-      // Mark successors executable
       auto markSucc = [&](BasicBlock *succ) {
         if (succ && reachable.insert(succ).second) {
           changed = true;
@@ -763,6 +761,93 @@ bool CopyPropPass::run(Function &fn) {
   return changed;
 }
 
+bool MemoryLoadElimPass::run(Function &fn) {
+  bool changed = false;
+
+  struct AddrKey {
+    const Symbol *sym;
+    int idx;
+    bool hasIdx;
+    bool operator==(const AddrKey &o) const {
+      return sym == o.sym && idx == o.idx && hasIdx == o.hasIdx;
+    }
+  };
+  struct AddrHash {
+    size_t operator()(const AddrKey &k) const {
+      return std::hash<const Symbol *>{}(k.sym) ^ (std::hash<int>{}(k.idx) << 1) ^
+             (k.hasIdx ? 0x9e3779b1 : 0);
+    }
+  };
+
+  for (auto &blk : fn.getBlocks()) {
+    std::unordered_map<AddrKey, Operand, AddrHash> avail;
+
+    auto killBase = [&](const Symbol *sym) {
+      for (auto it = avail.begin(); it != avail.end();) {
+        if (it->first.sym == sym) {
+          it = avail.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    };
+
+    for (auto &instPtr : blk->getInstructions()) {
+      Instruction *inst = instPtr.get();
+      OpCode op = inst->getOp();
+
+      if (op == OpCode::STORE) {
+        const Operand &base = inst->getArg2();
+        const Operand &idx = inst->getResult();
+        if (base.getType() == OperandType::Variable) {
+          auto sym = base.asSymbol().get();
+          if (idx.getType() == OperandType::Empty ||
+              (idx.getType() == OperandType::ConstantInt)) {
+            AddrKey k{sym, idx.getType() == OperandType::ConstantInt ? idx.asInt() : 0,
+                      idx.getType() == OperandType::ConstantInt};
+            avail[k] = inst->getArg1();
+          } else {
+            killBase(sym);
+          }
+        }
+        continue;
+      }
+
+      if (op == OpCode::LOAD) {
+        const Operand &base = inst->getArg1();
+        const Operand &idx = inst->getArg2();
+        if (base.getType() == OperandType::Variable) {
+          auto sym = base.asSymbol().get();
+          if (idx.getType() == OperandType::Empty ||
+              idx.getType() == OperandType::ConstantInt) {
+            AddrKey k{sym, idx.getType() == OperandType::ConstantInt ? idx.asInt() : 0,
+                      idx.getType() == OperandType::ConstantInt};
+            auto it = avail.find(k);
+            if (it != avail.end()) {
+              Operand val = it->second;
+              inst->setOp(OpCode::ASSIGN);
+              inst->setArg1(val);
+              inst->setArg2(Operand());
+              changed = true;
+              continue;
+            }
+          }
+          killBase(sym);
+        }
+        continue;
+      }
+
+      if (op == OpCode::CALL) {
+        avail.clear();
+        continue;
+      }
+
+    }
+  }
+
+  return changed;
+}
+
 // Helper to check if an operand is loop-invariant
 static bool
 isOperandInvariant(const Operand &op,
@@ -997,6 +1082,7 @@ bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt) {
   pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<ConstPropPass>());
   pm.add(std::make_unique<AlgebraicPass>());
+  pm.add(std::make_unique<MemoryLoadElimPass>());
   pm.add(std::make_unique<CSEPass>(dt));
   pm.add(std::make_unique<LocalDCEPass>());
 

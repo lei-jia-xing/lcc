@@ -121,4 +121,12 @@ private:
                const std::pair<OpCode, std::pair<Operand, Operand>> &rhs) const;
   };
 };
+/**
+ * @class MemoryLoadElimPass
+ * @brief Forward store-load forwarding and redundant load elimination.
+ */
+class MemoryLoadElimPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
 bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt);
