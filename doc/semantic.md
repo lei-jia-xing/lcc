@@ -4,89 +4,6 @@
 
 Semantic Analyzer（语义分析器）是 LCC 编译器的第三个阶段，负责对 Parser 生成的 AST 进行语义分析，包括类型检查、作用域管理、函数调用验证等。本文档详细介绍了 Semantic Analyzer 的设计架构、实现细节和使用方式。
 
-## 架构设计
-
-### 类结构
-
-`SemanticAnalyzer` 的对外接口和内部成员在头文件 `SemanticAnalyzer.hpp` 中定义，核心结构如下所示（省略了一些细节）：
-
-```cpp
-class SemanticAnalyzer {
-public:
-  SemanticAnalyzer();
-
-  // 语义分析入口：从编译单元根节点开始遍历 AST
-  void visit(CompUnit *node);
-
-  // 语义分析完成后导出符号表，供后续 CodeGen 使用
-  const SymbolTable &getSymbolTable() const;
-
-private:
-  // 初始化内建函数（printf、getint 等），在全局作用域中插入相应符号
-  void initializeBuiltinFunctions();
-
-  // 语义分析使用的符号表（栈式作用域管理）
-  SymbolTable symbolTable;
-
-  // 当前所在的循环嵌套深度，用于检查 break / continue 是否出现在合法位置
-  int loop = 0;
-
-  // 当前正在检查的函数返回类型，用于验证 return 语句
-  TypePtr current_function_return_type = nullptr;
-
-  // 是否启用与语义分析相关的额外输出（调试用）
-  bool outputenabled = false;
-
-  // 统一的错误上报接口，内部通过 ErrorReporter 收集错误
-  void error(const int &line, const std::string errorType);
-
-  // 下面是一系列针对不同 AST 节点的 visit 重载声明
-  void visit(Decl *node);
-  void visit(ConstDecl *node);
-  void visit(VarDecl *node);
-  void visit(ConstDef *node, TypePtr type);
-  void visit(VarDef *node, TypePtr type);
-  void visit(FuncDef *node);
-  void visit(MainFuncDef *node);
-  void visit(FuncFParams *node);
-  void visit(FuncFParam *node);
-  void visit(Block *node);
-  void visit(BlockItem *node);
-
-  void visit(Stmt *node);
-  void visit(AssignStmt *node);
-  void visit(ExpStmt *node);
-  void visit(BlockStmt *node);
-  void visit(IfStmt *node);
-  void visit(ForStmt *node);
-  void visit(BreakStmt *node);
-  void visit(ContinueStmt *node);
-  void visit(ReturnStmt *node);
-  void visit(PrintfStmt *node);
-  void visit(ForAssignStmt *node);
-
-  TypePtr visit(BType *node);
-  TypePtr visit(FuncType *node);
-  void visit(ConstInitVal *node);
-  void visit(InitVal *node);
-  TypePtr visit(Exp *node);
-  TypePtr visit(Cond *node);
-  TypePtr visit(LVal *node);
-  TypePtr visit(PrimaryExp *node);
-  TypePtr visit(Number *node);
-  TypePtr visit(UnaryExp *node);
-  void visit(UnaryOp *node);
-  std::vector<TypePtr> visit(FuncRParams *node);
-  TypePtr visit(MulExp *node);
-  TypePtr visit(AddExp *node);
-  TypePtr visit(RelExp *node);
-  TypePtr visit(EqExp *node);
-  TypePtr visit(LAndExp *node);
-  TypePtr visit(LOrExp *node);
-  TypePtr visit(ConstExp *node);
-};
-```
-
 ## 核心组件
 
 ### 1. 类型系统
@@ -120,7 +37,7 @@ public:
   bool is_static = false;
 
   TypePtr array_element_type;
-  int array_size = 0; // 似乎没有用
+  int array_size = 0; // 一点用都没有
 
   TypePtr return_type;
   std::vector<TypePtr> params;
@@ -274,7 +191,7 @@ public:
 - **l: printf 参数数量不匹配**：格式字符串参数数量与实际参数不符
 - **m: 循环控制语句错误**：break/continue 不在循环内使用
 
-所有错误通过 ErrorReporter 统一收集，最后按行号排序输出。
+所有错误通过 `ErrorReporter` 统一收集，最后按行号排序输出。
 
 ## 与其他组件的交互
 

@@ -142,9 +142,6 @@ bool LoopUnrollPass::isSimpleLoop(const LoopInfo &loop, int &tripCount,
     return false;
   }
 
-  if (tripCount > 128)
-    return false;
-
   return true;
 }
 
@@ -179,8 +176,8 @@ bool LoopUnrollPass::tryUnrollLoop(Function &func, const LoopInfo &loop) {
       loop.blocks.find(header->next.get()) == loop.blocks.end()) {
     exitBlock = header->next.get();
     exitBlockPtr = header->next;
-  } else if (header->jumpTarget && loop.blocks.find(header->jumpTarget.get()) ==
-                                       loop.blocks.end()) {
+  } else if (header->jumpTarget &&
+             loop.blocks.find(header->jumpTarget.get()) == loop.blocks.end()) {
     exitBlock = header->jumpTarget.get();
     exitBlockPtr = header->jumpTarget;
   }

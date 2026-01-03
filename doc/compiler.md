@@ -6,70 +6,90 @@
 
 ```
 .
+├── cliff.toml
 ├── CMakeLists.txt
 ├── config.json
 ├── doc
-│   ├── backend.md
-│   ├── compiler.md
-│   ├── ebnf.md
-│   ├── error.md
-│   ├── errorReporter.md
-│   ├── ir.md
-│   ├── lexer.md
-│   ├── overview.md
-│   ├── parser.md
-│   └── semantic.md
+│   ├── backend.md
+│   ├── compiler.md
+│   ├── ebnf.md
+│   ├── error.md
+│   ├── errorReporter.md
+│   ├── ir.md
+│   ├── lexer.md
+│   ├── optimize.md
+│   ├── overview.md
+│   ├── parser.md
+│   └── semantic.md
 ├── Doxyfile
 ├── include
-│   ├── backend
-│   │   ├── AsmGen.hpp
-│   │   └── RegisterAllocator.hpp
-│   ├── codegen
-│   │   ├── BasicBlock.hpp
-│   │   ├── CodeGen.hpp
-│   │   ├── Function.hpp
-│   │   ├── Instruction.hpp
-│   │   ├── Operand.hpp
-│   │   └── QuadOptimizer.hpp
-│   ├── errorReporter
-│   │   └── ErrorReporter.hpp
-│   ├── lexer
-│   │   ├── Lexer.hpp
-│   │   └── Token.hpp
-│   ├── parser
-│   │   ├── AST.hpp
-│   │   └── Parser.hpp
-│   └── semantic
-│       ├── SemanticAnalyzer.hpp
-│       ├── Symbol.hpp
-│       ├── SymbolTable.hpp
-│       └── Type.hpp
+│   ├── backend
+│   │   ├── AsmGen.hpp
+│   │   └── RegisterAllocator.hpp
+│   ├── codegen
+│   │   ├── BasicBlock.hpp
+│   │   ├── CodeGen.hpp
+│   │   ├── Function.hpp
+│   │   ├── Instruction.hpp
+│   │   ├── Operand.hpp
+│   │   └── QuadOptimizer.hpp
+│   ├── errorReporter
+│   │   └── ErrorReporter.hpp
+│   ├── lexer
+│   │   ├── Lexer.hpp
+│   │   └── Token.hpp
+│   ├── optimize
+│   │   ├── DominatorTree.hpp
+│   │   ├── GlobalConstEval.hpp
+│   │   ├── LICM.hpp
+│   │   ├── LoopAnalysis.hpp
+│   │   ├── LoopUnroll.hpp
+│   │   ├── Mem2Reg.hpp
+│   │   └── PhiElimination.hpp
+│   ├── parser
+│   │   ├── AST.hpp
+│   │   └── Parser.hpp
+│   └── semantic
+│       ├── SemanticAnalyzer.hpp
+│       ├── Symbol.hpp
+│       ├── SymbolTable.hpp
+│       └── Type.hpp
 ├── LICENSE
 ├── main.cpp
 ├── MARS2025+.jar
 ├── README.md
 ├── scripts
-│   └── test_mips.sh
+│   └── test_mips.sh
 └── src
     ├── backend
-    │   ├── AsmGen.cpp
-    │   └── RegisterAllocator.cpp
+    │   ├── AsmGen.cpp
+    │   └── RegisterAllocator.cpp
     ├── CMakeLists.txt
     ├── codegen
-    │   ├── BasicBlock.cpp
-    │   ├── CodeGen.cpp
-    │   ├── Function.cpp
-    │   ├── Instruction.cpp
-    │   ├── Operand.cpp
-    │   └── QuadOptimizer.cpp
+    │   ├── BasicBlock.cpp
+    │   ├── CodeGen.cpp
+    │   ├── Function.cpp
+    │   ├── Instruction.cpp
+    │   ├── Operand.cpp
+    │   └── QuadOptimizer.cpp
     ├── errorReporter
-    │   └── ErrorReporter.cpp
+    │   └── ErrorReporter.cpp
     ├── lexer
-    │   └── Lexer.cpp
+    │   └── Lexer.cpp
+    ├── optimize
+    │   ├── DominatorTree.cpp
+    │   ├── GlobalConstEval.cpp
+    │   ├── LICM.cpp
+    │   ├── LoopAnalysis.cpp
+    │   ├── LoopUnroll.cpp
+    │   ├── Mem2Reg.cpp
+    │   └── PhiElimination.cpp
     ├── parser
-    │   └── Parser.cpp
+    │   └── Parser.cpp
     └── semantic
         └── SemanticAnalyzer.cpp
+
+19 directories, 64 files
 ```
 
 ## 概述
@@ -161,4 +181,3 @@ LCC (Lightweight C Compiler) 是一个用 C++17 实现的轻量级 C 语言子�
 - 错误收集与输出：`errorReporter.md` 与 `error.md`
 - 中间表示与优化：`ir.md`
 - 后端与寄存器分配：`backend.md`
-

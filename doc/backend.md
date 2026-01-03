@@ -13,8 +13,8 @@
 
 ```cpp
 struct IRModuleView {
- std::vector<const Function *> functions;            // 所有函数
- std::vector<const Instruction *> globals;           // 全局 ALLOCA/初始化指令
+ std::vector<const Function *> functions;
+ std::vector<const Instruction *> globals;
  std::unordered_map<std::string, std::shared_ptr<Symbol>> stringLiterals;
 };
 ```
@@ -26,6 +26,13 @@ void AsmGen::generate(const IRModuleView &mod, std::ostream &out);
 ```
 
 它会先输出 `.data` 段（字符串常量与全局变量），再输出 `.text` 段（所有函数及运行时辅助例程）。
+
+### 变量遮蔽与命名唯一性
+
+- 语义阶段为每个声明分配唯一的 `Symbol`（按作用域递增的 `id`），IR 始终通过 `Symbol*` 绑定，而非仅凭名称；因此同名不同作用域的变量在 IR 中天然区分。
+- 全局与函数符号会填充 `globalName`（如 `fn_xxx`），若为空则回退到原始 `name`。数据段与文本段输出时使用 `globalName`，保证跨作用域唯一 label。
+- 局部/形参在后端以 `Symbol* -> {offset, size}` 映射存入 `locals_`，查找时同样按指针而非字符串；同名遮蔽不会互相冲突。
+- `ARG/CALL/ALLOCA/STORE` 等保持 `Symbol` 指针贯穿前后端，遮蔽不需要额外改名即可正确落栈或取全局地址。
 
 ## 2. 数据段生成（emitDataSection）
 
@@ -61,19 +68,13 @@ global_or_mangled_name: .word v0, v1, v2, ...
 
 1. 为每个函数输出 `.globl name` 与标签 `name:`。
 2. 优先输出 `main` 函数，其后输出其他函数。
-3. 在末尾内联简化版 `printf` 与 `getint` 运行时例程。
+3. 在末尾内联 `printf` 与 `getint` 运行时例程。
 
 `emitTextSection` 内部对每个 `Function` 调用 `emitFunction` 完成具体翻译。
 
 ## 寄存器分配（RegisterAllocator）
 
 后端采用经典的图着色寄存器分配算法，将 IR 临时变量映射到 8 个**可分配寄存器**：
-
-```cpp
-// RegisterAllocator 内部约定：
-static const int NumRegs = 8; // 对应 AsmGen 中的 $s0-$s7
-```
-
 `AsmGen` 在构造时会初始化一张寄存器描述表：
 
 ```cpp
@@ -81,11 +82,7 @@ static const char *Regs[NUM_ALLOCATABLE_REGS] =
   {"$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6", "$s7"};
 ```
 
-每个函数在生成汇编前，都会调用：
-
-```cpp
-_regAllocator.run(const_cast<Function *>(func));
-```
+每个函数在生成汇编前，都会调用寄存器分配算法来分配`$s`寄存器
 
 ### Use/Def 与活跃性分析
 
@@ -143,7 +140,8 @@ AsmGen 逻辑中，MIPS 寄存器按角色划分：
 | **返回值寄存器** | `$v0` | 函数返回值 |
 | **栈/帧/返回地址** | `$sp/$fp/$ra` | 维护栈帧和控制流 |
 
-> 当前实现中，`AsmGen::allocateScratch` 会在 `$t0-$t9` 中线性扫描一个 `inUse == false` 的寄存器并标记为使用，若耗尽则返回 `$zero` 作为失败占位；每条 IR 指令开始时通过 `resetScratchState()` 清空 `inUse` 标记，保证 scratch 寄存器不跨指令泄漏。
+> 当前实现中，`AsmGen::allocateScratch` 会在 `$t0-$t9` 中线性扫描一个 `inUse == false` 的寄存器并标记为使用，若耗尽则返回 `$zero` 作为失败占位(不过不可能失败就是了，一条ir用不了9个寄存器)；
+每条 IR 指令开始时通过 `resetScratchState()` 清空 `inUse` 标记，保证 scratch 寄存器不跨指令泄漏。
 
 ### 栈帧布局
 
@@ -178,7 +176,7 @@ AsmGen 逻辑中，MIPS 寄存器按角色划分：
 
 ```mips
 func_name:
- addiu $sp, $sp, -frameSize   # 若 frameSize 超出 16bit，则使用 li+addu
+ addiu $sp, $sp, -frameSize
  sw   $ra, 0($sp)
  sw   $fp, 4($sp)
  sw   $sX, offset($sp)        # 对每个使用的 $sX 保存
@@ -215,24 +213,20 @@ func_name_END:
 两个重要的内部工具函数：
 
 - `std::string AsmGen::getRegister(const Operand &op, std::ostream &out);`
- 	- `Temporary`：若未溢出，直接返回其分配的 `$sX`；若溢出，则使用 scratch 寄存器从 `_spillOffsets` 指示的栈位置 `lw` 进来；
- 	- `ConstantInt`：若为 0，直接返回 `$zero`；否则分配一个 scratch，输出 `li scratch, imm` 并返回；
- 	- `Variable`：根据符号是否为局部/全局、是否数组，决定使用 `lw` 读值或 `la` 取地址；
- 	- 其他类型（Label/Empty）：统一返回 `$zero`（不会被算术路径使用）。
+  - `Temporary`：若未溢出，直接返回其分配的 `$sX`；若溢出，则使用 scratch 寄存器从 `_spillOffsets` 指示的栈位置 `lw` 进来；
+  - `ConstantInt`：若为 0，直接返回 `$zero`；否则分配一个 scratch，输出 `li scratch, imm` 并返回；
+  - `Variable`：根据符号是否为局部/全局、是否数组，决定使用 `lw` 读值或 `la` 取地址；
+  - 其他类型（Label/Empty）：统一返回 `$zero`（不会被算术路径使用）。
 
 - `void AsmGen::storeResult(const Operand &op, const std::string &reg, std::ostream &out);`
- 	- 若目标为溢出临时：按照 `_spillOffsets` 中的偏移写回栈帧；
- 	- 若为局部变量：根据 `locals_` 查找偏移，`sw reg, offset($fp)`；
- 	- 若为全局变量：通过 `la scratch, globalName` 获取地址，再 `sw reg, 0(scratch)`。
+  - 若目标为溢出临时：按照 `_spillOffsets` 中的偏移写回栈帧；
+  - 若为局部变量：根据 `locals_` 查找偏移，`sw reg, offset($fp)`；
+  - 若为全局变量：通过 `la scratch, globalName` 获取地址，再 `sw reg, 0(scratch)`。
 
 `lowerInstruction` 在多数算术/逻辑指令中遵循以下模板：
 
 1. 使用 `getRegister` 为 `arg1/arg2` 获取寄存器（可能是 `$sX` 或 `$t?`）。
 2. 通过 `regForTemp` 或 `allocateScratch` 决定结果寄存器：
-  - 若 `result` 是未溢出的临时，则使用其专属 `$sX`；
-  - 否则使用一个 scratch。
-3. 输出对应的 MIPS 指令（`addu/subu/mul/div/mflo/...`）。
-4. 若 `result` 是临时且被标记为溢出，在寄存器计算完成后调用 `storeToSpill(tempId, rd)` 落栈。
 
 ### 典型指令映射
 
@@ -256,8 +250,8 @@ func_name_END:
 
 - **LOAD/STORE**：
 
- 	- 局部变量：经 `locals_` 查找偏移，使用 `lw/sw offset($fp)`；
- 	- 全局变量：
+  - 局部变量：经 `locals_` 查找偏移，使用 `lw/sw offset($fp)`；
+  - 全局变量：
 
   ```mips
   la  $t?, globalName
@@ -265,35 +259,31 @@ func_name_END:
   sw  rv, 0($t?)    # 写
   ```
 
- 	- 数组访问：对动态索引用 `sll indexReg, 2` 计算字节偏移，再与基址相加。
+  - 数组访问：对动态索引用 `sll indexReg, 2` 计算字节偏移，再与基址相加。
 
 - **控制流**：
 
- 	- `LABEL`：输出 `<func>_L<id>:`；
- 	- `GOTO`：`j <func>_L<id>`；
- 	- `IF`：`bne condReg, $zero, <func>_L<id>`。
+  - `LABEL`：输出 `<func>_L<id>:`；
+  - `GOTO`：`j <func>_L<id>`；
+  - `IF`：`bne condReg, $zero, <func>_L<id>`。
 
 - **CALL/RETURN**：
 
- 	- `ARG`：前 4 个参数写 `$a0-$a3`；其余暂存于 `pendingExtraArgs_`，在 `CALL` 中统一压栈；
- 	- `CALL`：将额外参数按顺序 `sw` 到栈上，`jal funcName` 后再 `addiu $sp, $sp, extraBytes` 弹栈；若有返回值，将 `$v0` 拷贝到对应临时并按需落栈；
- 	- `RETURN`：将常量或表达式结果写入 `$v0` 后，`j func_END`。
+  - `ARG`：前 4 个参数写 `$a0-$a3`；其余暂存于 `pendingExtraArgs_`，在 `CALL` 中统一压栈；
+  - `CALL`：将额外参数按顺序 `sw` 到栈上，`jal funcName` 后再 `addiu $sp, $sp, extraBytes` 弹栈；若有返回值，将 `$v0` 拷贝到对应临时并按需落栈；
+  - `RETURN`：将常量或表达式结果写入 `$v0` 后，`j func_END`。
 
 ## 运行时辅助例程
 
 `emitTextSection` 在所有函数之后内联了两个简化运行时函数：
 
 - `printf`：
- 	- 使用 syscall 1/11 实现整数与字符输出；
- 	- 遍历格式字符串，仅支持 `%d` 占位符，其余字符逐字打印；
- 	- 在进入时保存 `$t0-$t2` 与 `$a0-$a3`，返回前恢复，并使用 `jr $ra` 返回。
+  - 使用 syscall 1/11 实现整数与字符输出；
+  - 遍历格式字符串，仅支持 `%d` 占位符，其余字符逐字打印；
+  - 在进入时保存 `$t0-$t2` 与 `$a0-$a3`，返回前恢复，并使用 `jr $ra` 返回。
 
 - `getint`：
- 	- 调用 syscall 5 从标准输入读取一个整数；
- 	- 结果存入 `$v0`，`jr $ra` 返回。
+  - 调用 syscall 5 从标准输入读取一个整数；
+  - 结果存入 `$v0`，`jr $ra` 返回。
 
 这些例程不通过 IR 生成，而是直接由 AsmGen 拼接文本，方便在所有程序中复用。
-
----
-
-以上描述了当前后端实现的整体结构与关键策略，尤其是寄存器分配与栈帧布局的细节。若后续修改调用约定、引入新的寄存器分类或增加优化（如跨块重写），请同步更新本文件以保持文档与代码一致。

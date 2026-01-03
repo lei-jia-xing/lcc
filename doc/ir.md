@@ -4,7 +4,7 @@
 
 - **表示形式**：四元式三地址码 `(op, arg1, arg2, result)`。
 - **组织结构**：`Module → Function → BasicBlock → Instruction`，并显式维护 CFG（fallthrough + 跳转）。
-- **非 SSA**：变量与临时均可多次赋值。常量折叠后，`result` 甚至可直接是常量。
+- **SSA 支持**：前端生成的 IR 默认非 SSA，可多次赋值；Mem2Reg 会插入 `PHI` 节点进入 SSA，PhiElimination 在销毁阶段移除 `PHI`，恢复非 SSA。常量折叠后，`result` 可直接写常量。
 - **类型模型**：语言仅有 `int` 与 `void`。数组在 IR 层表现为 `int*`（地址），索引一律以“元素”为单位。
 - **后端接口**：`IRModuleView` 暴露 `functions`、`globals`（全局 ALLOCA 与常量初始化）以及 `stringLiterals`。
 
@@ -57,6 +57,8 @@ Module
 | `STORE` | `STORE value(var\|temp\|const), base(var\|temp), index(var\|temp\|const\|empty)` | 写数组/指针,`index`为空视为指针(虽然测试样例并不会出现指针赋值的操作) |
 | `ALLOCA` | `ALLOCA var(var), -, size(var\|temp\|const)` | 分配 `size` 个 word。全局进入 `.data`，局部在栈帧分配 |
 
+> 这里地址语义的确定我们通过简单的的判断`index`是否为`Empty`来判断
+
 ### 控制流
 
 | OpCode | 形式 | 说明 |
@@ -72,27 +74,13 @@ Module
 |--------|------|------|
 | `PARAM` | `PARAM idx(const), -, res(var)`  | **函数定义阶段**使用：记录“第 idx 个形式参数绑定哪个符号”。必须出现在入口块的开头 |
 | `ARG` | `ARG arg(var\|temp\|const), -, -` | **调用方**使用：将一个实参排入队列。后端在 `CALL` 时顺序消费 |
-| `CALL` | `CALL argc(const), func(label), res(temp\|empty)` | 发起调用。`argc` = 之前发射的 `ARG` 数；`res` 可为空表示忽略返回值 |
+| `CALL` | `CALL argc(const), func(var), res(temp)` | 发起调用。`func` 是函数符号（`Variable`），`argc` = 之前发射的 `ARG` 数；`res` 可为空表示忽略返回值 |
 
 > 前端保证：`CALL` 之前连续出现 `argc` 条 `ARG`，且中途不会夹杂其他 `CALL`。
 
-## 基本块与 CFG
+### SSA 相关
 
-1. 新的 `LABEL` 启动基本块。
-2. `GOTO`、`IF`、`RETURN` 结束当前块；若后面还有指令必须显式插入新的 `LABEL`。
-3. `BasicBlock::next` 连接 fallthrough，`jumpTarget` 记录显式分支。
-
-该结构为活跃性分析（寄存器分配）、短路求值与优化 pass 提供边界。
-
-## 函数结构与模块接口
-
-- `Function` 保存：名称、返回类型、形式参数向量、基本块列表以及 CFG 边。
-- `CodeGen` 在函数入口自动发射 `PARAM idx, var`，同时根据 AST 插入 `ALLOCA`、`ASSIGN`、`LOAD/STORE` 等。
-- `IRModuleView` 仅提供对函数/全局的只读访问，后端在遍历过程中不会修改 IR。
-
-## 与后端交互要点
-
-- `Label` ID 在函数内必须唯一且为非负整数，后端以 `func_L{id}` 命名，但是在IR中没有体现。
-- `ALLOCA` 的 `size` 单位是 **word**。后端在 `.data` 或栈帧中实际分配 `size * 4` 字节。
-- `globals` 中允许混合 `ALLOCA/ASSIGN/STORE`，`AsmGen::emitDataSection` 会利用常量信息输出 `.word` 或运行期初始化代码。
-- `ARG/CALL`：IR 层需保证不会把 `ARG` 与其他 `CALL`/`ARG` 交叉嵌套，避免后端状态污染。
+| OpCode | 形式 | 说明 |
+|--------|------|------|
+| `PHI` | `PHI -, -, res(var\|temp)` | SSA 形态使用。实际参数存于 `Instruction::getPhiArgs()`，记录 `(value, predBB)` 列表；结果写入 `res` |
+| `NOP` | `NOP -, -, -` | 占位或被消解后的指令；后端将会直接忽略 |
