@@ -27,6 +27,382 @@ static bool hasSideEffect(OpCode op) {
   }
 }
 
+struct LatticeVal {
+  enum class Kind { Unknown, Constant, Overdefined } kind = Kind::Unknown;
+  int value = 0;
+};
+
+static LatticeVal mergeLattice(LatticeVal cur, LatticeVal incoming,
+                               bool &changed) {
+  if (cur.kind == incoming.kind) {
+    if (cur.kind == LatticeVal::Kind::Constant && cur.value != incoming.value) {
+      changed |= true;
+      return {LatticeVal::Kind::Overdefined, 0};
+    }
+    return cur;
+  }
+
+  if (cur.kind == LatticeVal::Kind::Unknown) {
+    changed |= incoming.kind != LatticeVal::Kind::Unknown;
+    return incoming;
+  }
+
+  if (incoming.kind == LatticeVal::Kind::Unknown) {
+    return cur;
+  }
+
+  // One constant and one overdefined, or different constants handled above
+  changed |= cur.kind != LatticeVal::Kind::Overdefined;
+  return {LatticeVal::Kind::Overdefined, 0};
+}
+
+static LatticeVal constVal(int v) { return {LatticeVal::Kind::Constant, v}; }
+static LatticeVal overdef() { return {LatticeVal::Kind::Overdefined, 0}; }
+static LatticeVal unknown() { return {LatticeVal::Kind::Unknown, 0}; }
+
+static LatticeVal evalUnary(OpCode op, const LatticeVal &a) {
+  if (a.kind == LatticeVal::Kind::Overdefined)
+    return overdef();
+  if (a.kind != LatticeVal::Kind::Constant)
+    return unknown();
+  switch (op) {
+  case OpCode::NEG:
+    return constVal(-a.value);
+  case OpCode::NOT:
+    return constVal(!a.value);
+  default:
+    return unknown();
+  }
+}
+
+static LatticeVal evalBinary(OpCode op, const LatticeVal &a,
+                             const LatticeVal &b) {
+  if (a.kind == LatticeVal::Kind::Overdefined ||
+      b.kind == LatticeVal::Kind::Overdefined)
+    return overdef();
+  if (a.kind != LatticeVal::Kind::Constant ||
+      b.kind != LatticeVal::Kind::Constant)
+    return unknown();
+
+  int x = a.value, y = b.value;
+  switch (op) {
+  case OpCode::ADD:
+    return constVal(x + y);
+  case OpCode::SUB:
+    return constVal(x - y);
+  case OpCode::MUL:
+    return constVal(x * y);
+  case OpCode::DIV:
+    if (y == 0)
+      return unknown();
+    return constVal(x / y);
+  case OpCode::MOD:
+    if (y == 0)
+      return unknown();
+    return constVal(x % y);
+  case OpCode::EQ:
+    return constVal(x == y);
+  case OpCode::NEQ:
+    return constVal(x != y);
+  case OpCode::LT:
+    return constVal(x < y);
+  case OpCode::LE:
+    return constVal(x <= y);
+  case OpCode::GT:
+    return constVal(x > y);
+  case OpCode::GE:
+    return constVal(x >= y);
+  case OpCode::AND:
+    return constVal((x != 0) && (y != 0));
+  case OpCode::OR:
+    return constVal((x != 0) || (y != 0));
+  default:
+    return unknown();
+  }
+}
+
+bool CFGSCCPPass::run(Function &fn) {
+  if (fn.getBlocks().empty())
+    return false;
+
+  bool anyChange = false;
+
+  std::unordered_map<int, LatticeVal> lattice;
+  std::unordered_set<BasicBlock *> reachable;
+  reachable.insert(fn.getBlocks().front().get());
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+
+    for (auto &bbPtr : fn.getBlocks()) {
+      BasicBlock *bb = bbPtr.get();
+      if (!reachable.count(bb))
+        continue;
+
+      // PHI nodes first
+      for (auto &inst : bb->getInstructions()) {
+        if (inst->getOp() != OpCode::PHI)
+          break;
+        LatticeVal merged = unknown();
+        bool hasInput = false;
+        for (auto &arg : inst->getPhiArgs()) {
+          if (!reachable.count(arg.second))
+            continue;
+          hasInput = true;
+          LatticeVal v;
+          if (arg.first.getType() == OperandType::ConstantInt) {
+            v = constVal(arg.first.asInt());
+          } else if (arg.first.getType() == OperandType::Temporary) {
+            auto it = lattice.find(arg.first.asInt());
+            v = (it == lattice.end()) ? unknown() : it->second;
+          } else {
+            v = overdef();
+          }
+          merged = mergeLattice(merged, v, changed);
+        }
+        if (!hasInput)
+          continue;
+        if (inst->getResult().getType() == OperandType::Temporary) {
+          int id = inst->getResult().asInt();
+          auto cur = lattice[id];
+          bool localChange = false;
+          lattice[id] = mergeLattice(cur, merged, localChange);
+          changed |= localChange;
+        }
+      }
+
+      LatticeVal lastCond = unknown();
+
+      for (auto &inst : bb->getInstructions()) {
+        OpCode op = inst->getOp();
+        if (op == OpCode::PHI || op == OpCode::LABEL || op == OpCode::NOP)
+          continue;
+
+        auto getVal = [&](const Operand &o) -> LatticeVal {
+          if (o.getType() == OperandType::ConstantInt)
+            return constVal(o.asInt());
+          if (o.getType() == OperandType::Temporary) {
+            auto it = lattice.find(o.asInt());
+            return (it == lattice.end()) ? unknown() : it->second;
+          }
+          return overdef();
+        };
+
+        if (op == OpCode::IF) {
+          lastCond = getVal(inst->getArg1());
+        }
+
+        LatticeVal res = overdef();
+        switch (op) {
+        case OpCode::ASSIGN:
+          res = getVal(inst->getArg1());
+          break;
+        case OpCode::NEG:
+        case OpCode::NOT:
+          res = evalUnary(op, getVal(inst->getArg1()));
+          break;
+        case OpCode::ADD:
+        case OpCode::SUB:
+        case OpCode::MUL:
+        case OpCode::DIV:
+        case OpCode::MOD:
+        case OpCode::EQ:
+        case OpCode::NEQ:
+        case OpCode::LT:
+        case OpCode::LE:
+        case OpCode::GT:
+        case OpCode::GE:
+        case OpCode::AND:
+        case OpCode::OR:
+          res = evalBinary(op, getVal(inst->getArg1()),
+                           getVal(inst->getArg2()));
+          break;
+        default:
+          res = overdef();
+          break;
+        }
+
+        if (inst->getResult().getType() == OperandType::Temporary) {
+          int id = inst->getResult().asInt();
+          auto cur = lattice[id];
+          bool localChange = false;
+          lattice[id] = mergeLattice(cur, res, localChange);
+          changed |= localChange;
+        }
+      }
+
+      // Mark successors executable
+      auto markSucc = [&](BasicBlock *succ) {
+        if (succ && reachable.insert(succ).second) {
+          changed = true;
+        }
+      };
+
+      if (!bb->getInstructions().empty()) {
+        Instruction *term = bb->getInstructions().back().get();
+        OpCode op = term->getOp();
+        if (op == OpCode::IF) {
+          if (lastCond.kind == LatticeVal::Kind::Constant) {
+            if (lastCond.value != 0) {
+              markSucc(bb->jumpTarget ? bb->jumpTarget.get() : nullptr);
+            } else {
+              markSucc(bb->next ? bb->next.get() : nullptr);
+            }
+          } else {
+            markSucc(bb->jumpTarget ? bb->jumpTarget.get() : nullptr);
+            markSucc(bb->next ? bb->next.get() : nullptr);
+          }
+        } else if (op == OpCode::GOTO) {
+          markSucc(bb->jumpTarget ? bb->jumpTarget.get() : nullptr);
+        } else if (op == OpCode::RETURN) {
+          // no successor
+        } else {
+          markSucc(bb->next ? bb->next.get() : nullptr);
+        }
+      }
+    }
+  }
+
+  // Rewrite stage
+  for (auto &bbPtr : fn.getBlocks()) {
+    BasicBlock *bb = bbPtr.get();
+    if (!reachable.count(bb)) {
+      anyChange = true;
+      continue;
+    }
+
+    auto replaceOp = [&](Operand &o) {
+      if (o.getType() == OperandType::Temporary) {
+        auto it = lattice.find(o.asInt());
+        if (it != lattice.end() &&
+            it->second.kind == LatticeVal::Kind::Constant) {
+          o = Operand::ConstantInt(it->second.value);
+          anyChange = true;
+        }
+      }
+    };
+
+    auto &insts = bb->getInstructions();
+    for (auto it = insts.begin(); it != insts.end();) {
+      Instruction *inst = it->get();
+      OpCode op = inst->getOp();
+
+      if (op == OpCode::PHI) {
+        auto &args = inst->getPhiArgs();
+        for (auto ait = args.begin(); ait != args.end();) {
+          if (!reachable.count(ait->second)) {
+            ait = args.erase(ait);
+            anyChange = true;
+          } else {
+            replaceOp(ait->first);
+            ++ait;
+          }
+        }
+        if (args.size() == 1) {
+          Operand only = args.front().first;
+          inst->setOp(OpCode::ASSIGN);
+          inst->setArg1(only);
+          inst->setArg2(Operand());
+          args.clear();
+          anyChange = true;
+        } else if (args.empty()) {
+          inst->setOp(OpCode::NOP);
+          inst->setArg1(Operand());
+          inst->setArg2(Operand());
+          inst->setResult(Operand());
+          args.clear();
+          anyChange = true;
+        }
+        ++it;
+        continue;
+      }
+
+      Operand a1 = inst->getArg1();
+      replaceOp(a1);
+      inst->setArg1(a1);
+      Operand a2 = inst->getArg2();
+      replaceOp(a2);
+      inst->setArg2(a2);
+      if (op == OpCode::RETURN || op == OpCode::STORE ||
+          op == OpCode::ALLOCA || op == OpCode::PARAM) {
+        Operand r = inst->getResult();
+        replaceOp(r);
+        inst->setResult(r);
+      }
+
+      if (inst->getResult().getType() == OperandType::Temporary) {
+        auto itLat = lattice.find(inst->getResult().asInt());
+        if (itLat != lattice.end() &&
+            itLat->second.kind == LatticeVal::Kind::Constant) {
+          if (op != OpCode::CALL && op != OpCode::LOAD) {
+            inst->setOp(OpCode::ASSIGN);
+            inst->setArg1(Operand::ConstantInt(itLat->second.value));
+            inst->setArg2(Operand());
+            anyChange = true;
+          }
+        }
+      }
+
+      if (op == OpCode::IF) {
+        auto condVal = inst->getArg1();
+        if (condVal.getType() == OperandType::ConstantInt) {
+          if (condVal.asInt() != 0) {
+            inst->setOp(OpCode::GOTO);
+            inst->setArg1(Operand());
+            inst->setArg2(Operand());
+            bb->next = nullptr;
+            anyChange = true;
+          } else {
+            inst->setOp(OpCode::NOP);
+            inst->setArg1(Operand());
+            inst->setArg2(Operand());
+            inst->setResult(Operand());
+            bb->jumpTarget = nullptr;
+            anyChange = true;
+          }
+        }
+      }
+
+      if (op == OpCode::GOTO) {
+        if (bb->jumpTarget && !reachable.count(bb->jumpTarget.get())) {
+          inst->setOp(OpCode::NOP);
+          inst->setArg1(Operand());
+          inst->setArg2(Operand());
+          inst->setResult(Operand());
+          bb->jumpTarget = nullptr;
+          anyChange = true;
+        }
+      }
+
+      ++it;
+    }
+
+    if (bb->next && !reachable.count(bb->next.get())) {
+      bb->next = nullptr;
+      anyChange = true;
+    }
+    if (bb->jumpTarget && !reachable.count(bb->jumpTarget.get())) {
+      bb->jumpTarget = nullptr;
+      anyChange = true;
+    }
+  }
+
+  if (reachable.size() != fn.getBlocks().size()) {
+    std::vector<std::shared_ptr<BasicBlock>> kept;
+    kept.reserve(reachable.size());
+    for (auto &bbPtr : fn.getBlocks()) {
+      if (reachable.count(bbPtr.get())) {
+        kept.push_back(bbPtr);
+      }
+    }
+    fn.getBlocks() = std::move(kept);
+    anyChange = true;
+  }
+
+  return anyChange;
+}
+
 bool LocalDCEPass::run(Function &fn) {
   bool changed = false;
 
@@ -609,12 +985,21 @@ bool CSEPass::run(Function &fn) {
 }
 
 bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt) {
-  // Run local optimizations
+  bool changed = false;
+
+  CFGSCCPPass sccp;
+  if (sccp.run(fn)) {
+    changed = true;
+    dt.run(fn); // CFG may change; refresh dominance
+  }
+
   PassManager pm;
   pm.add(std::make_unique<CopyPropPass>());
   pm.add(std::make_unique<ConstPropPass>());
   pm.add(std::make_unique<AlgebraicPass>());
   pm.add(std::make_unique<CSEPass>(dt));
   pm.add(std::make_unique<LocalDCEPass>());
-  return pm.run(fn);
+
+  changed |= pm.run(fn);
+  return changed;
 }

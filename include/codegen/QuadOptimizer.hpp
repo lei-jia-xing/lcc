@@ -29,6 +29,15 @@ private:
 };
 
 /**
+ * @class CFGSCCPPass
+ * @brief Sparse conditional constant propagation + CFG folding
+ */
+class CFGSCCPPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
+/**
  * @class LocalDCEPass
  * @brief Dead Code Elimination in funtion scope
  *
