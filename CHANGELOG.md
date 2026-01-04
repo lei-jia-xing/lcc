@@ -1,6 +1,6 @@
 ## # LCC 编译器 - CHANGELOG [unreleased]
 
-### 🚀 Features
+### Features
 
 - Add DomTree and LICM analysis
 - Add some some optimize
@@ -22,7 +22,7 @@
 - Add SCCP pass
 - Final commit
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Prevent wrong LICM for variabel
 - Tempid should be managed by function
@@ -35,23 +35,23 @@
 - Remove Inliner pass
 - Remove CFGCleanup
 
-### 💼 Other
+### Other
 
 - Cliff to show changelog
 - Add independent phielimination pass
 - Make param ir atomic for optimizing purpose
 
-### 📚 Documentation
+### Documentation
 
 - Fix serval bug
 - Add optimize article
 - Complete docs
 
-### ⚡ Performance
+### Performance
 
 - Optimize pass order & structure
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Clean script
 - Merge goto & if into one block
@@ -64,7 +64,7 @@
 
 ## [1.0.0] - 2025-12-06
 
-### 🚀 Features
+### Features
 
 - Lexer complete
 - Add AST classes
@@ -116,7 +116,7 @@
 - Add CopyProp & constProp pass
 - Add sll for 2^n mul
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Fix RE bug for Lexer
 - Correctly order skipwhitespace and finish signal
@@ -142,7 +142,7 @@
 - Make code clear
 - The abuse of scratch reg (#4)
 
-### 💼 Other
+### Other
 
 - Compiler init!!!
 - Add Parser into cmake
@@ -153,11 +153,11 @@
 - Add complie_commands
 - Add OpType for LAnd & LOr
 
-### 🚜 Refactor
+### Refactor
 
 - Make mips suit for MIPS32 standard
 
-### 📚 Documentation
+### Documentation
 
 - Add doxygen config
 - Add lexer docs
@@ -178,7 +178,7 @@
 - Update docs
 - Update docs
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Suit for buaa test
 - Add a LICENESE

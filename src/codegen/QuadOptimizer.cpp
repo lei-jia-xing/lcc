@@ -27,6 +27,13 @@ static bool hasSideEffect(OpCode op) {
   }
 }
 
+static bool isArraySymbol(const Operand &op) {
+  if (op.getType() != OperandType::Variable)
+    return false;
+  const auto &sym = op.asSymbol();
+  return sym && sym->type && sym->type->category == Type::Category::Array;
+}
+
 struct LatticeVal {
   enum class Kind { Unknown, Constant, Overdefined } kind = Kind::Unknown;
   int value = 0;
@@ -214,8 +221,8 @@ bool CFGSCCPPass::run(Function &fn) {
         case OpCode::GE:
         case OpCode::AND:
         case OpCode::OR:
-          res = evalBinary(op, getVal(inst->getArg1()),
-                           getVal(inst->getArg2()));
+          res =
+              evalBinary(op, getVal(inst->getArg1()), getVal(inst->getArg2()));
           break;
         default:
           res = overdef();
@@ -322,8 +329,8 @@ bool CFGSCCPPass::run(Function &fn) {
       Operand a2 = inst->getArg2();
       replaceOp(a2);
       inst->setArg2(a2);
-      if (op == OpCode::RETURN || op == OpCode::STORE ||
-          op == OpCode::ALLOCA || op == OpCode::PARAM) {
+      if (op == OpCode::RETURN || op == OpCode::STORE || op == OpCode::ALLOCA ||
+          op == OpCode::PARAM) {
         Operand r = inst->getResult();
         replaceOp(r);
         inst->setResult(r);
@@ -774,8 +781,8 @@ bool MemoryLoadElimPass::run(Function &fn) {
   };
   struct AddrHash {
     size_t operator()(const AddrKey &k) const {
-      return std::hash<const Symbol *>{}(k.sym) ^ (std::hash<int>{}(k.idx) << 1) ^
-             (k.hasIdx ? 0x9e3779b1 : 0);
+      return std::hash<const Symbol *>{}(k.sym) ^
+             (std::hash<int>{}(k.idx) << 1) ^ (k.hasIdx ? 0x9e3779b1 : 0);
     }
   };
 
@@ -803,7 +810,9 @@ bool MemoryLoadElimPass::run(Function &fn) {
           auto sym = base.asSymbol().get();
           if (idx.getType() == OperandType::Empty ||
               (idx.getType() == OperandType::ConstantInt)) {
-            AddrKey k{sym, idx.getType() == OperandType::ConstantInt ? idx.asInt() : 0,
+            AddrKey k{sym,
+                      idx.getType() == OperandType::ConstantInt ? idx.asInt()
+                                                                : 0,
                       idx.getType() == OperandType::ConstantInt};
             avail[k] = inst->getArg1();
           } else {
@@ -820,7 +829,9 @@ bool MemoryLoadElimPass::run(Function &fn) {
           auto sym = base.asSymbol().get();
           if (idx.getType() == OperandType::Empty ||
               idx.getType() == OperandType::ConstantInt) {
-            AddrKey k{sym, idx.getType() == OperandType::ConstantInt ? idx.asInt() : 0,
+            AddrKey k{sym,
+                      idx.getType() == OperandType::ConstantInt ? idx.asInt()
+                                                                : 0,
                       idx.getType() == OperandType::ConstantInt};
             auto it = avail.find(k);
             if (it != avail.end()) {
@@ -841,7 +852,6 @@ bool MemoryLoadElimPass::run(Function &fn) {
         avail.clear();
         continue;
       }
-
     }
   }
 
@@ -1086,6 +1096,349 @@ bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt) {
   pm.add(std::make_unique<CSEPass>(dt));
   pm.add(std::make_unique<LocalDCEPass>());
 
+  pm.add(std::make_unique<ArrayBaseHoistPass>());
+  pm.add(std::make_unique<CleanupPass>());
+
   changed |= pm.run(fn);
+  return changed;
+}
+
+bool CleanupPass::run(Function &fn) {
+  bool changed = false;
+
+  // Compute temp use counts across the whole function.
+  std::unordered_map<int, int> useCount;
+  auto addUse = [&](const Operand &op) {
+    if (op.getType() == OperandType::Temporary)
+      useCount[op.asInt()]++;
+  };
+
+  for (auto &blk : fn.getBlocks()) {
+    for (auto &inst : blk->getInstructions()) {
+      if (!inst)
+        continue;
+      OpCode op = inst->getOp();
+      if (op == OpCode::PHI) {
+        for (auto &pair : inst->getPhiArgs()) {
+          addUse(pair.first);
+        }
+      } else {
+        addUse(inst->getArg1());
+        addUse(inst->getArg2());
+      }
+      if (op == OpCode::RETURN || op == OpCode::STORE || op == OpCode::ALLOCA ||
+          op == OpCode::PARAM) {
+        addUse(inst->getResult());
+      }
+    }
+  }
+
+  for (auto &blk : fn.getBlocks()) {
+    auto &insts = blk->getInstructions();
+
+    // 1) Remove explicit NOPs.
+    for (auto it = insts.begin(); it != insts.end();) {
+      if ((*it)->getOp() == OpCode::NOP) {
+        it = insts.erase(it);
+        changed = true;
+        continue;
+      }
+      ++it;
+    }
+
+    // 2) Remove self-assigns (ASSIGN x -> x).
+    for (auto it = insts.begin(); it != insts.end();) {
+      Instruction *inst = it->get();
+      if (inst->getOp() == OpCode::ASSIGN &&
+          inst->getArg1() == inst->getResult()) {
+        it = insts.erase(it);
+        changed = true;
+        continue;
+      }
+      ++it;
+    }
+
+    // 3) Collapse trivial consecutive copy chains:
+    //    ASSIGN src -> t
+    //    ASSIGN t   -> dst   (t used only once)
+    for (size_t i = 0; i + 1 < insts.size();) {
+      Instruction *a = insts[i].get();
+      Instruction *b = insts[i + 1].get();
+      if (a && b && a->getOp() == OpCode::ASSIGN &&
+          b->getOp() == OpCode::ASSIGN) {
+        const Operand &t = a->getResult();
+        const Operand &src = a->getArg1();
+        const Operand &bSrc = b->getArg1();
+        if (t.getType() == OperandType::Temporary &&
+            bSrc.getType() == OperandType::Temporary &&
+            bSrc.asInt() == t.asInt() && useCount[t.asInt()] == 1) {
+          b->setArg1(src);
+          insts.erase(insts.begin() + static_cast<long>(i));
+          changed = true;
+          continue; // keep i at same position
+        }
+      }
+      ++i;
+    }
+
+    // 4) Fold adjacent copy-to-ARG:
+    //    ASSIGN src -> t
+    //    ARG t
+    // If t is used exactly once, rewrite ARG to use src and delete ASSIGN.
+    for (size_t i = 0; i + 1 < insts.size();) {
+      Instruction *a = insts[i].get();
+      Instruction *b = insts[i + 1].get();
+      if (!a || !b) {
+        ++i;
+        continue;
+      }
+      if (a->getOp() == OpCode::ASSIGN && b->getOp() == OpCode::ARG) {
+        const Operand &t = a->getResult();
+        const Operand &src = a->getArg1();
+        const Operand &arg = b->getArg1();
+        if (t.getType() == OperandType::Temporary &&
+            arg.getType() == OperandType::Temporary &&
+            arg.asInt() == t.asInt() && useCount[t.asInt()] == 1) {
+          b->setArg1(src);
+          insts.erase(insts.begin() + static_cast<long>(i));
+          changed = true;
+          continue;
+        }
+      }
+      ++i;
+    }
+
+    // 5) Fold adjacent copy-to-RETURN:
+    //    ASSIGN src -> t
+    //    RETURN t
+    for (size_t i = 0; i + 1 < insts.size();) {
+      Instruction *a = insts[i].get();
+      Instruction *b = insts[i + 1].get();
+      if (!a || !b) {
+        ++i;
+        continue;
+      }
+      if (a->getOp() == OpCode::ASSIGN && b->getOp() == OpCode::RETURN) {
+        const Operand &t = a->getResult();
+        const Operand &src = a->getArg1();
+        const Operand &ret = b->getResult();
+        if (t.getType() == OperandType::Temporary &&
+            ret.getType() == OperandType::Temporary &&
+            ret.asInt() == t.asInt() && useCount[t.asInt()] == 1) {
+          b->setResult(src);
+          insts.erase(insts.begin() + static_cast<long>(i));
+          changed = true;
+          continue;
+        }
+      }
+      ++i;
+    }
+
+    // 6) Fold adjacent copy-to-IF:
+    //    ASSIGN src -> t
+    //    IF t, L
+    for (size_t i = 0; i + 1 < insts.size();) {
+      Instruction *a = insts[i].get();
+      Instruction *b = insts[i + 1].get();
+      if (!a || !b) {
+        ++i;
+        continue;
+      }
+      if (a->getOp() == OpCode::ASSIGN && b->getOp() == OpCode::IF) {
+        const Operand &t = a->getResult();
+        const Operand &src = a->getArg1();
+        const Operand &cond = b->getArg1();
+        if (t.getType() == OperandType::Temporary &&
+            cond.getType() == OperandType::Temporary &&
+            cond.asInt() == t.asInt() && useCount[t.asInt()] == 1) {
+          b->setArg1(src);
+          insts.erase(insts.begin() + static_cast<long>(i));
+          changed = true;
+          continue;
+        }
+      }
+      ++i;
+    }
+
+    // 7) Fold adjacent copy-to-STORE value:
+    //    ASSIGN src -> t
+    //    STORE t, base, idx
+    for (size_t i = 0; i + 1 < insts.size();) {
+      Instruction *a = insts[i].get();
+      Instruction *b = insts[i + 1].get();
+      if (!a || !b) {
+        ++i;
+        continue;
+      }
+      if (a->getOp() == OpCode::ASSIGN && b->getOp() == OpCode::STORE) {
+        const Operand &t = a->getResult();
+        const Operand &src = a->getArg1();
+        const Operand &val = b->getArg1();
+        if (t.getType() == OperandType::Temporary &&
+            val.getType() == OperandType::Temporary &&
+            val.asInt() == t.asInt() && useCount[t.asInt()] == 1) {
+          b->setArg1(src);
+          insts.erase(insts.begin() + static_cast<long>(i));
+          changed = true;
+          continue;
+        }
+      }
+      ++i;
+    }
+  }
+
+  return changed;
+}
+
+bool ArrayBaseHoistPass::run(Function &fn) {
+  bool changed = false;
+  if (fn.getBlocks().empty())
+    return false;
+
+  // Detect pointer-like array parameters: in this IR, formal array params are
+  // typically lowered as an ALLOCA of size 1 holding the passed-in address.
+  std::unordered_map<const Symbol *, int> allocaSize;
+  for (auto &blkPtr : fn.getBlocks()) {
+    for (auto &instPtr : blkPtr->getInstructions()) {
+      Instruction *inst = instPtr.get();
+      if (!inst)
+        continue;
+      if (inst->getOp() != OpCode::ALLOCA)
+        continue;
+      const Operand &symOp = inst->getArg1();
+      if (symOp.getType() != OperandType::Variable)
+        continue;
+      const Symbol *sym = symOp.asSymbol().get();
+      int sz = 1;
+      const Operand &szOp = inst->getResult();
+      if (szOp.getType() == OperandType::ConstantInt) {
+        sz = szOp.asInt();
+      }
+      allocaSize[sym] = sz;
+    }
+  }
+
+  for (auto &blkPtr : fn.getBlocks()) {
+    BasicBlock *bb = blkPtr.get();
+    if (!bb)
+      continue;
+
+    auto &insts = bb->getInstructions();
+    if (insts.size() < 2)
+      continue;
+
+    // Count array element accesses per base symbol within this block.
+    struct BaseInfo {
+      int count = 0;
+      Operand baseOp;
+    };
+    std::unordered_map<const Symbol *, BaseInfo> counts;
+
+    auto record = [&](const Operand &base) {
+      if (!isArraySymbol(base))
+        return;
+      const Symbol *sym = base.asSymbol().get();
+
+      auto itSz = allocaSize.find(sym);
+      if (itSz != allocaSize.end() && itSz->second == 1) {
+        // Pointer-like (formal array param lowered via size-1 alloca); skip.
+        return;
+      }
+
+      auto &info = counts[sym];
+      info.count++;
+      if (info.baseOp.getType() != OperandType::Variable)
+        info.baseOp = base;
+    };
+
+    for (auto &instPtr : insts) {
+      Instruction *inst = instPtr.get();
+      if (!inst)
+        continue;
+      OpCode op = inst->getOp();
+      if (op == OpCode::LOAD) {
+        const Operand &base = inst->getArg1();
+        const Operand &idx = inst->getArg2();
+        if (idx.getType() != OperandType::Empty) {
+          record(base);
+        }
+      } else if (op == OpCode::STORE) {
+        const Operand &base = inst->getArg2();
+        const Operand &idx = inst->getResult();
+        if (idx.getType() != OperandType::Empty) {
+          record(base);
+        }
+      }
+    }
+
+    // Insert hoisted base address temps for bases used 2+ times.
+    std::unordered_map<const Symbol *, int> hoistedTemp;
+    for (auto &kv : counts) {
+      if (kv.second.count >= 2) {
+        int tid = fn.allocateTemp();
+        hoistedTemp[kv.first] = tid;
+      }
+    }
+    if (hoistedTemp.empty())
+      continue;
+
+    // Determine insertion point: after leading LABEL/PHI.
+    auto insertIt = insts.begin();
+    while (insertIt != insts.end()) {
+      OpCode op = (*insertIt)->getOp();
+      if (op == OpCode::LABEL || op == OpCode::PHI) {
+        ++insertIt;
+      } else {
+        break;
+      }
+    }
+
+    for (auto &kv : hoistedTemp) {
+      const Symbol *sym = kv.first;
+      int tid = kv.second;
+      const Operand &baseVar = counts[sym].baseOp;
+      auto loadAddr = std::make_unique<Instruction>(Instruction::MakeLoad(
+          baseVar, Operand::Empty(), Operand::Temporary(tid)));
+      insertIt = insts.insert(insertIt, std::move(loadAddr));
+      ++insertIt;
+      changed = true;
+    }
+
+    // Rewrite accesses in this block to use the hoisted base temp.
+    for (auto &instPtr : insts) {
+      Instruction *inst = instPtr.get();
+      if (!inst)
+        continue;
+      OpCode op = inst->getOp();
+      if (op == OpCode::LOAD) {
+        const Operand &base = inst->getArg1();
+        const Operand &idx = inst->getArg2();
+        if (idx.getType() == OperandType::Empty)
+          continue;
+        if (base.getType() == OperandType::Variable && isArraySymbol(base)) {
+          const Symbol *sym = base.asSymbol().get();
+          auto it = hoistedTemp.find(sym);
+          if (it != hoistedTemp.end()) {
+            inst->setArg1(Operand::Temporary(it->second));
+            changed = true;
+          }
+        }
+      } else if (op == OpCode::STORE) {
+        const Operand &base = inst->getArg2();
+        const Operand &idx = inst->getResult();
+        if (idx.getType() == OperandType::Empty)
+          continue;
+        if (base.getType() == OperandType::Variable && isArraySymbol(base)) {
+          const Symbol *sym = base.asSymbol().get();
+          auto it = hoistedTemp.find(sym);
+          if (it != hoistedTemp.end()) {
+            inst->setArg2(Operand::Temporary(it->second));
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
   return changed;
 }

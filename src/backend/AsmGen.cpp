@@ -552,12 +552,19 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
       std::string dst = getResultReg(res);
       if (isConst(a1)) {
         out << "  li " << dst << ", " << a1.asInt() << "\n";
+        storeToSpill(res.asInt(), dst);
       } else {
         std::string src = getRegister(a1, out);
-        out << "  move " << dst << ", " << src << "\n";
-        releaseScratch(src);
+        bool sameReg = (dst == src);
+        if (!sameReg) {
+          out << "  move " << dst << ", " << src << "\n";
+        }
+        // Important: store before releasing src when src==dst.
+        storeToSpill(res.asInt(), dst);
+        if (!sameReg) {
+          releaseScratch(src);
+        }
       }
-      storeToSpill(res.asInt(), dst);
     } else if (isVar(res)) {
       std::string src = getRegister(a1, out);
       storeResult(res, src, out);
@@ -868,6 +875,34 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string baseReg;
     const Symbol *baseSym = nullptr;
 
+    // Fast path: local (non-param) array with constant index can directly use
+    // fp-relative addressing, avoiding an extra address materialization.
+    if (isVar(a1) && isConst(a2)) {
+      baseSym = a1.asSymbol().get();
+      auto lit = locals_.find(baseSym);
+      if (lit != locals_.end()) {
+        bool isParam = false;
+        for (auto &p : formalParamByIndex_) {
+          if (p == baseSym) {
+            isParam = true;
+            break;
+          }
+        }
+        bool isArray = baseSym && baseSym->type &&
+                       baseSym->type->category == Type::Category::Array;
+        if (isArray && !isParam) {
+          int baseOff = lit->second.offset;
+          int totalOff = baseOff + a2.asInt() * 4;
+          if (totalOff >= -32768 && totalOff <= 32767) {
+            std::string dstReg = getResultReg(res);
+            out << "  lw " << dstReg << ", " << totalOff << "($fp)\n";
+            storeResult(res, dstReg, out);
+            break;
+          }
+        }
+      }
+    }
+
     if (isVar(a1)) {
       baseSym = a1.asSymbol().get();
       auto lit = locals_.find(baseSym);
@@ -928,6 +963,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         out << "  li " << offReg << ", " << offset << "\n";
         out << "  addu " << offReg << ", " << baseReg << ", " << offReg << "\n";
         out << "  lw " << dstReg << ", 0(" << offReg << ")\n";
+        releaseScratch(offReg);
       }
     } else {
       indexReg = getRegister(a2, out);
@@ -951,6 +987,33 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
     std::string rv = getRegister(a1, out);
     std::string baseReg;
     const Symbol *baseSym = nullptr;
+
+    // Fast path: local (non-param) array with constant index can directly use
+    // fp-relative addressing, avoiding an extra address materialization.
+    if (isVar(a2) && isConst(res)) {
+      baseSym = a2.asSymbol().get();
+      auto lit = locals_.find(baseSym);
+      if (lit != locals_.end()) {
+        bool isParam = false;
+        for (auto &p : formalParamByIndex_) {
+          if (p == baseSym) {
+            isParam = true;
+            break;
+          }
+        }
+        bool isArray = baseSym && baseSym->type &&
+                       baseSym->type->category == Type::Category::Array;
+        if (isArray && !isParam) {
+          int baseOff = lit->second.offset;
+          int totalOff = baseOff + res.asInt() * 4;
+          if (totalOff >= -32768 && totalOff <= 32767) {
+            out << "  sw " << rv << ", " << totalOff << "($fp)\n";
+            releaseScratch(rv);
+            break;
+          }
+        }
+      }
+    }
 
     if (isVar(a2)) {
       baseSym = a2.asSymbol().get();
@@ -1009,7 +1072,7 @@ void AsmGen::lowerInstruction(const Instruction *inst, std::ostream &out) {
         releaseScratch(offReg);
       }
     } else {
-      std::string indexReg = getRegister(idxOp, out);
+      indexReg = getRegister(idxOp, out);
       std::string offsetReg = allocateScratch();
       out << "  sll " << offsetReg << ", " << indexReg << ", 2\n";
       out << "  addu " << offsetReg << ", " << baseReg << ", " << offsetReg

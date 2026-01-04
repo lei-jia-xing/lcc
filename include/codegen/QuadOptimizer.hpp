@@ -129,4 +129,30 @@ class MemoryLoadElimPass : public QuadPass {
 public:
   bool run(Function &fn) override;
 };
+
+/**
+ * @class ArrayBaseHoistPass
+ * @brief Hoist repeated array base address materialization inside a basic block.
+ *
+ * For a block with multiple LOAD/STORE using the same array base symbol with
+ * non-empty indices, introduce one temp holding the base address:
+ *   tBase = LOAD a, -, tBase   (index is Empty)
+ * and rewrite those LOAD/STORE to use tBase as the base.
+ */
+class ArrayBaseHoistPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
+
+/**
+ * @class CleanupPass
+ * @brief Cleanup IR after other optimizations.
+ *
+ * Removes NOP instructions, drops self-assigns, and collapses trivial ASSIGN
+ * chains created by other passes.
+ */
+class CleanupPass : public QuadPass {
+public:
+  bool run(Function &fn) override;
+};
 bool runDefaultQuadOptimizations(Function &fn, DominatorTree &dt);
